@@ -1,0 +1,48 @@
+[project]
+name = "meipi-indexing"
+version = "0.1.0"
+description = "Indexing Documents mit PostgreSQL"
+authors = [{ name = "Meinolf Piwek", email = "your.email@example.com" }]
+requires-python = ">=3.12"
+dependencies = [
+    "cupy-cuda12x>=13.6.0",
+    "dotenv>=0.9.9",
+    "imagehash>=4.3.2",
+    "keyring>=25.6.0",
+    "langchain-core>=0.3.74",
+    "numpy>=2.2.6",
+    "nvidia-dali-cuda120>=1.51.2",
+    "pgvector>=0.4.1",
+    "pillow>=11.3.0",
+    "pillow-heif>=1.1.0",
+    "python-xmp-toolkit>=2.0.2",
+    "sentence-transformers>=5.1.0",
+    "sqlalchemy>=2.0.43",
+    "tika>=3.1.0",
+    "torch>=2.8.0",
+    "torchvision>=0.23.0",
+    "tqdm>=4.67.1",
+]
+
+[dependency-groups]
+dev = [
+    "deptry>=0.23.1",
+    "imageio>=2.37.0",
+    "ipykernel>=6.30.1",
+    "ipywidgets>=8.1.7",
+    "jupyter>=1.1.1",
+    "meipi-indexing",
+    "nvidia-dali-cuda120>=1.51.2",
+    "nvidia-pyindex>=1.0.9",
+    "opencv-contrib-python>=4.12.0.88",
+    "pandas>=2.3.2",
+    "parquet>=1.3.1",
+    "rdflib>=7.1.4",
+]
+
+[tool.uv.sources]
+meipi-indexing = { workspace = true }
+
+[tool.uv.extra-build-dependencies]
+nvidia-pyindex = ["pip"]
+nvidia-dali = ["pip"]
