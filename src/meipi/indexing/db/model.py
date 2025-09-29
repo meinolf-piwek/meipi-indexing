@@ -36,8 +36,11 @@ class PILArray(types.TypeDecorator):
     """
 
     impl = BYTEA
-
     cache_ok = True
+    
+    @property
+    def python_type(self) -> type[np.ndarray]:
+        return np.ndarray
 
     def process_bind_param(self, value: np.ndarray, dialect):
         bf = io.BytesIO()
