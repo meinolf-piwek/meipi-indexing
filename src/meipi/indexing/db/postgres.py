@@ -21,7 +21,7 @@ class pgEngine:
         self.logger = logger
         self.metadata = metadata
         try:
-            self.engine = create_engine(db_conn_string, echo=True, **enginekwargs)
+            self.engine = create_engine(db_conn_string, **enginekwargs)
             self.Session = sessionmaker(
                 bind=self.engine, expire_on_commit=False, **sessionkwargs
             )

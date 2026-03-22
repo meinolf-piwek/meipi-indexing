@@ -1,12 +1,19 @@
+[tool.setuptools.packages.find]
+where = ["src/"]
+include = ["meipi"]
+namespaces = true
 [project]
 name = "meipi-indexing"
 version = "0.1.0"
 description = "Indexing Documents mit PostgreSQL"
 authors = [{ name = "Meinolf Piwek", email = "your.email@example.com" }]
+license = { file = "LICENSE" }
 requires-python = ">=3.12"
 dependencies = [
+    "accelerate>=1.10.1",
     "cupy-cuda12x>=13.6.0",
     "dotenv>=0.9.9",
+    "huggingface>=0.0.1",
     "imagehash>=4.3.2",
     "keyring>=25.6.0",
     "langchain-core>=0.3.74",
@@ -15,6 +22,7 @@ dependencies = [
     "pgvector>=0.4.1",
     "pillow>=11.3.0",
     "pillow-heif>=1.1.0",
+    "psycopg>=3.2.10",
     "python-xmp-toolkit>=2.0.2",
     "sentence-transformers>=5.1.0",
     "sqlalchemy>=2.0.43",
@@ -38,6 +46,7 @@ dev = [
     "pandas>=2.3.2",
     "parquet>=1.3.1",
     "rdflib>=7.1.4",
+    "twine>=6.2.0",
 ]
 
 [tool.uv.sources]
@@ -46,3 +55,14 @@ meipi-indexing = { workspace = true }
 [tool.uv.extra-build-dependencies]
 nvidia-pyindex = ["pip"]
 nvidia-dali = ["pip"]
+
+
+
+[build-system]
+requires = ["uv_build >= 0.8.17"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "meipi"
+namespace = true
+src-dir = "src"

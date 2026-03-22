@@ -14,7 +14,7 @@ Es erzeugt Tabellen mit Metadaten, Bild- und Textdaten in einer PostgreSQL Daten
 ## Installation
 
 ```bash
-git clone https://github.com/dein-benutzername/meipi-indexing.git
+git clone https://github.com/meinolf-piwek/meipi-indexing.git
 cd meipi-indexing
 uv pip install .
 ```

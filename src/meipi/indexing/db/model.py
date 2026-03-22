@@ -190,3 +190,24 @@ class DBPic(Base, DBMetaMixin):
     def calc_phash(cls,im: Image)-> bytes:
         h = phash(im,cls._phash_size,cls._phash_high_freq)
         return bytes.fromhex(str(h))    
+    
+class PicVectorMixin(MappedAsDataclass):
+    """Mixin für PicVectorTables"""
+
+    _vector_size = 0
+    pic_id: Mapped[int] = mapped_column(ForeignKey("pictures.id"), primary_key=True)
+        
+    @declared_attr
+    def vector(cls) -> Mapped[list[float]]:  # pylint: disable=no-self-argument, missing-function-docstring
+        return mapped_column(Vector(cls._vector_size), nullable=False)
+
+    # @declared_attr
+    # def pic(cls) -> Mapped[DBPic]:  # pylint: disable=no-self-argument, missing-function-docstring
+    #     return relationship(DBPic)
+    
+class DBDinoV2Vector(Base, PicVectorMixin):
+    """SQLAlchemy model for DINO V2 image embeddings stored in PostgreSQL."""
+    __tablename__ = "dino_v2 vectors"
+    _vector_size = 1024  # Größe des Vektors für DINO-Modelle
+
+    
