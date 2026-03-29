@@ -1,7 +1,26 @@
-"""Konfiguration der App"""
+"""Konfiguration der App
+
+Neben der hier definierten default-Konfiguration,
+können die Werte auch über eine .env-Datei oder direkt über Umgebungsvariablen überschrieben werden.
+Die .env-Datei sollte im Root-Verzeichnis der App liegen und den Namen "config.env" tragen.
+
+Beispiel für eine .env-Datei:
+PG_HOST=localhost                   #PostgreSQL Host
+PG_PORT=5432                        #PostgreSQL Port
+PG_USER=postgres                    #PostgreSQL Username
+PG_DATABASE=postgres                #PostgreSQL Database Name
+PG_API_KEY=pg-docker                #API-Key-Name für das DB-Passwort im Keyring
+IND_DATADIR=./data                  #Datenverzeichnis
+IND_DOCROOT=/home/rslsync/folders/  #Dokumenten-Root-Verzeichnis
+IND_DOCSUF=.pdf,.txt,.md,.docx,.doc,.html,.htm,.epub,.odt  #zulässige Dokumentenerweiterungen
+IND_PICSUF=.jpg,.jpeg,.bmp,.png,.heic,.tiff,.tif  #zulässige Bild-Dateiendungen
+IND_VIDSUF=.mov,.vob,.mkv,.avi,.mp4,.mcf  #zulässige Video-Dateiendungen
+
+Das DB-Passwort wird aus dem Keyring geholt, der API-Key-Name
+kann über die Umgebungsvariable PG_API_KEY konfiguriert werden (Standard: "pg-docker").
+"""
 
 import os
-from typing import overload
 import logging
 from contextlib import suppress
 from dataclasses import dataclass
@@ -29,28 +48,13 @@ class Config:
         ".epub",
         ".odt",
     )
-    picsuf: tuple[str] = (
-        ".jpg",
-        ".jpeg",
-        ".bmp",
-        ".png",
-        ".heic",
-        ".tiff",
-        ".tif"
-    )
-    vidsuf: tuple[str] = (
-        ".mov",
-        ".vob",
-        ".mkv",
-        ".avi",
-        ".mp4",
-        ".mcf"
-    )
+    picsuf: tuple[str] = (".jpg", ".jpeg", ".bmp", ".png", ".heic", ".tiff", ".tif")
+    vidsuf: tuple[str] = (".mov", ".vob", ".mkv", ".avi", ".mp4", ".mcf")
 
     @staticmethod
     def get_db_passwd() -> str:
-        """Je nach Target anders machen!"""
-        api_key = os.getenv("PG_API_KEY","pg-docker")
+        """DB Password aus Keyring holen, oder Default-Wert verwenden"""
+        api_key = os.getenv("PG_API_KEY", "pg-docker")
         keyring.set_keyring(SecretServiceKeyring())
         return keyring.get_password("API-Keys", api_key)
 
@@ -71,18 +75,30 @@ class Config:
         )
         datadir = os.getenv("IND_DATADIR", ".")
         docroot = os.getenv("IND_DOCROOT", "/home/rslsync/folders/")
-        docsuf = os.getenv("IND_DOCSUF",cls.docsuf)
-        picsuf = os.getenv("IND_PICSUF", cls.picsuf)
-        vidsuf = os.getenv("IND_VIDSUF", cls.vidsuf)
-        return cls(db_conn_string=db_conn_string, 
-                   datadir=datadir,
-                   docroot=docroot,
-                   docsuf = docsuf,
-                   picsuf = picsuf,
-                   vidsuf = vidsuf
-                   )
-    
-    def get_ftype(self,suf:str)-> str:
+        # TODO: Umwandlung testen
+        docsufstr = os.getenv("IND_DOCSUF")
+        docsuf = (
+            tuple(s.strip() for s in docsufstr.split(",")) if docsufstr else cls.docsuf
+        )
+        picsufstr = os.getenv("IND_PICSUF")
+        picsuf = (
+            tuple(s.strip() for s in picsufstr.split(",")) if picsufstr else cls.picsuf
+        )
+        vidsufstr = os.getenv("IND_VIDSUF")
+        vidsuf = (
+            tuple(s.strip() for s in vidsufstr.split(",")) if vidsufstr else cls.vidsuf
+        )
+        return cls(
+            db_conn_string=db_conn_string,
+            datadir=datadir,
+            docroot=docroot,
+            docsuf=docsuf,
+            picsuf=picsuf,
+            vidsuf=vidsuf,
+        )
+
+    def get_ftype(self, suf: str) -> str:
+        """Gibt den konfigurierten Dateityp zurück, basierend auf der Dateiendung"""
         _suf = suf.lower()
         if _suf in self.docsuf:
             return "doc"
@@ -92,5 +108,3 @@ class Config:
             return "vid"
         else:
             return None
-        
-            

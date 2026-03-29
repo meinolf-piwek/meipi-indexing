@@ -1,5 +1,9 @@
-"""Wird aktuell nicht genutzt - nur als Beispiel"""
-# pylint: disable=E1136,W0105, abstract-method
+"""Modelle zur Speicherung der eigentlichen Bilder und Dokumente in der Datenbank.
+
+Aktuell nicht genutzt, da die Bilder und Dokumente in Dateien auf der Festplatte gespeichert werden."""
+#TODO: Umbenennen und erweitern, um auch die Speicherung von Dokumenten zu ermöglichen.
+#TODO: S3-Integration für Bilder und Dokumente, um die Datenbank von großen Binärdaten zu entlasten.
+
 import io
 from sqlalchemy.types import TypeDecorator, LargeBinary
 from sqlalchemy.orm import (
@@ -12,7 +16,7 @@ from .model import Base
 class PILImageType(TypeDecorator):
     """Decorator für Bilder-Attribut"""
     impl = LargeBinary
-               
+                   
     def process_bind_param(self, value:Image.Image | None, dialect):
         if value is None:
             return None
@@ -26,6 +30,8 @@ class PILImageType(TypeDecorator):
         return Image.open(io.BytesIO(value))
         
 class Photo(Base):
+    """Tabelle für Bilddaten
+   """
     __tablename__ = "photos"
     
     id: Mapped[int] = mapped_column(primary_key=True)

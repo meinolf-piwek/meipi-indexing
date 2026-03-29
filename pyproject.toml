@@ -4,9 +4,9 @@ include = ["meipi"]
 namespaces = true
 [project]
 name = "meipi-indexing"
-version = "0.1.0"
+version = "0.0.1"
 description = "Indexing Documents mit PostgreSQL"
-authors = [{ name = "Meinolf Piwek", email = "your.email@example.com" }]
+authors = [{ name = "Meinolf Piwek", email = "meinolf@piwek.email" }]
 license = { file = "LICENSE" }
 requires-python = ">=3.12"
 dependencies = [
@@ -23,11 +23,13 @@ dependencies = [
     "pillow>=11.3.0",
     "pillow-heif>=1.1.0",
     "psycopg>=3.2.10",
+    "pylint-pydantic>=0.4.1",
     "python-xmp-toolkit>=2.0.2",
     "sentence-transformers>=5.1.0",
     "sqlalchemy>=2.0.43",
     "tika>=3.1.0",
     "torch>=2.8.0",
+    "torchao>=0.16.0",
     "torchvision>=0.23.0",
     "tqdm>=4.67.1",
 ]

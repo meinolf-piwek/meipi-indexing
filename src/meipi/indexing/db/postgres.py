@@ -6,8 +6,8 @@ from sqlalchemy import create_engine, insert
 from .model import Base as ModelBase
 
 
-# Create the PostgreSQL engine and Sessionmaker
 class pgEngine:
+    """Create the PostgreSQL engine and Sessionmaker, and provide methods for database operations."""
     def __init__(
         self,
         db_conn_string,
