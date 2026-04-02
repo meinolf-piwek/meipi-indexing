@@ -1,22 +1,32 @@
-"""General utilities for indexing."""
+"""General utilities for indexing.
 
+    This module contains functions for reading metadata from the database, resizing images, and updating the database with thumbnails.
+    """
 import io
 from itertools import batched
 from pathlib import Path
+from typing import List, Tuple
 from tqdm.auto import tqdm
 import sqlalchemy as sa
 from PIL import Image
-from meipi.indexing.preprocess import DALIImageResizer, dbpic_from_dbmeta
-from meipi.indexing.db import DBMeta, DBPic, pgEngine
-from meipi.indexing import appconf
+from .preprocess import DALIImageResizer, dbpic_from_dbmeta
+from .db import DBMeta, DBPic, pgEngine
+from . import appconf
 
+type PicList = List[Tuple[str, int]]  # List of tuples (file path, id)
 image_pattern = appconf.picsuf
 image_root = Path(appconf.docroot + "Bilder/")
 engine = pgEngine(appconf.db_conn_string)
 # Base.metadata.create_all(engine.engine)
 
 
-def insert_pics_from_meta(pool):
+def insert_pics_from_meta(pool:str):
+    """Liest die Metadaten aller Bilder aus dem angegebenen Pool aus,
+    erstellt zugehörige DBPic-Objekte und fügt sie der DB hinzu.
+
+    Args:
+        pool (str): Frei wählbarer Name für den Datenpool, z.B. "Bilder", "Texte", etc.
+    """
     with engine.Session() as session:
         stmt = sa.select(DBMeta).where(DBMeta.pool == pool)
         metalist = session.execute(stmt).scalars().all()
@@ -31,7 +41,8 @@ def insert_pics_from_meta(pool):
         session.commit()
 
 
-def read_no_heic():
+def read_no_heic()->PicList:
+    """Liest die Pfade und ids aller Bilder aus der Datenbank, die noch keinen Thumbnail haben, aber keine HEICs sind."""
     with engine.Session() as session:
         stmt = (
             sa.select(DBPic.id, DBPic.path)
@@ -41,13 +52,27 @@ def read_no_heic():
     return [(appconf.docroot + x.path, x.id) for x in session.execute(stmt)]
 
 
-def read_pic_no_thumb():
+def read_pic_no_thumb()-> PicList:
+    """Liest die Pfade und ids aller Bilder aus der Datenbank, die noch keinen Thumbnail haben"""
     with engine.Session() as session:
         stmt = sa.select(DBPic.id, DBPic.path).where(DBPic.thumbarray == None)
     return [(appconf.docroot + x.path, x.id) for x in session.execute(stmt)]
 
 
-def resize_pics(piclist, batch_size, pipe_batch_size, use_PIL):
+def resize_pics(piclist: PicList, batch_size: int, pipe_batch_size: int, use_PIL: bool)-> Tuple[
+    List[bytes], List[int], List[str], List[int]]:
+    """Erstellt Thumbnails für die Bilder in piclist
+
+    Args:
+        piclist (PicList): Liste von Paaren aus Dateipfad und id
+        batch_size (int): Anzahl der Bilder, die in einem Batch verarbeitet werden sollen
+        pipe_batch_size (int): Anzahl Bilder pro Batch, die an die DALI-Pipeline übergeben werden sollen
+        use_PIL (bool): Ob die Thumbnails mit PIL erstellt werden sollen (True) oder mit DALI (False)
+
+    Returns:
+        Tuple[List[bytes], List[int], List[str], List[int]]: Vier Listen: 1. Thumbnails als Byte-Arrays, 
+        2. zugehörige ids, 3. Pfad der fehlgeschlagene Bilder, 4. ids der fehlgeschlagenen Bilder   
+    """
     image_resizer = DALIImageResizer(
         pipe_batch_size=pipe_batch_size, num_threads=4, use_PIL=use_PIL
     )

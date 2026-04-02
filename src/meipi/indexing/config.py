@@ -4,17 +4,18 @@ Neben der hier definierten default-Konfiguration,
 können die Werte auch über eine .env-Datei oder direkt über Umgebungsvariablen überschrieben werden.
 Die .env-Datei sollte im Root-Verzeichnis der App liegen und den Namen "config.env" tragen.
 
-Beispiel für eine .env-Datei:
-PG_HOST=localhost                   #PostgreSQL Host
-PG_PORT=5432                        #PostgreSQL Port
-PG_USER=postgres                    #PostgreSQL Username
-PG_DATABASE=postgres                #PostgreSQL Database Name
-PG_API_KEY=pg-docker                #API-Key-Name für das DB-Passwort im Keyring
-IND_DATADIR=./data                  #Datenverzeichnis
-IND_DOCROOT=/home/rslsync/folders/  #Dokumenten-Root-Verzeichnis
-IND_DOCSUF=.pdf,.txt,.md,.docx,.doc,.html,.htm,.epub,.odt  #zulässige Dokumentenerweiterungen
-IND_PICSUF=.jpg,.jpeg,.bmp,.png,.heic,.tiff,.tif  #zulässige Bild-Dateiendungen
-IND_VIDSUF=.mov,.vob,.mkv,.avi,.mp4,.mcf  #zulässige Video-Dateiendungen
+Beispiel für eine ``.env-Datei``::
+
+    PG_HOST=localhost                   #PostgreSQL Host
+    PG_PORT=5432                        #PostgreSQL Port
+    PG_USER=postgres                    #PostgreSQL Username
+    PG_DATABASE=postgres                #PostgreSQL Database Name
+    PG_API_KEY=pg-docker                #API-Key-Name für das DB-Passwort im Keyring
+    IND_DATADIR=./data                  #Datenverzeichnis
+    IND_DOCROOT=/home/rslsync/folders/  #Dokumenten-Root-Verzeichnis
+    IND_DOCSUF=.pdf,.txt,.md,.docx,.doc,.html,.htm,.epub,.odt  #zulässige Dokumentenerweiterungen
+    IND_PICSUF=.jpg,.jpeg,.bmp,.png,.heic,.tiff,.tif  #zulässige Bild-Dateiendungen
+    IND_VIDSUF=.mov,.vob,.mkv,.avi,.mp4,.mcf  #zulässige Video-Dateiendungen
 
 Das DB-Passwort wird aus dem Keyring geholt, der API-Key-Name
 kann über die Umgebungsvariable PG_API_KEY konfiguriert werden (Standard: "pg-docker").
@@ -31,7 +32,11 @@ from keyring.backends.SecretService import Keyring as SecretServiceKeyring
 
 @dataclass
 class Config:
-    """Enthält die Konfiguration der App"""
+    """Enthält die Konfiguration der App
+
+    Die Konfiguration kann entweder über Umgebungsvariablen oder über eine .env-Datei bereitgestellt werden.
+    Die .env-Datei sollte im Root-Verzeichnis der App liegen und den Namen "config.env" tragen.
+    """
 
     db_conn_string: str
     datadir: str

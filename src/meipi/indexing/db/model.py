@@ -1,17 +1,21 @@
 """PostgreSQL database model for pictures, documents and their metadata.
 Es wird SQLAlchemy ORM verwendet, um die Datenbanktabellen zu definieren und zu verwalten.
-Die Modelle umfassen:
-- DBMeta: Tabelle für Meta-Daten von Dateien
-- DBDoc: Tabelle für Textdokumente mit Volltextindex
-- DBPic: Tabelle für Bilder mit Thumbnail und Perceptual Hash
-- DBDinoV2Vector: Tabelle für DINO V2 Bildvektoren
-Die Mixins DBMetaMixin, DocVectorMixin und PicVectorMixin 
+Die Modelle umfassen
+
+    * :class:`DBMeta`: Tabelle für Meta-Daten von Dateien
+    * :class:`DBDoc`: Tabelle für Textdokumente mit Volltextindex
+    * :class:`DBPic`: Tabelle für Bilder mit Thumbnail und Perceptual Hash
+    * :class:`DBDinoV2Vector`: Tabelle für DINO V2 Bildvektoren
+    
+Die Mixins :class:`DBMetaMixin`, :class:`DocVectorMixin` und :class:`PicVectorMixin` 
 bieten gemeinsame Felder und Methoden für die jeweiligen Modelle. 
+
 Die Modelle enthalten Methoden zum Erstellen und Löschen von Tabellen 
 sowie zur Durchführung von Volltextsuchen und Berechnung von Perceptual Hashes."""
 #TODO: Tabellen für Dokumenten- und Bildvektoren, die von Embedder-Modellen erstellt werden, hinzufügen
 
 import io
+import types
 from typing import Optional, Self
 from PIL import Image
 import numpy as np

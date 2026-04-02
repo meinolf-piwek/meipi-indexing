@@ -1,7 +1,10 @@
 # Meipi Indexing
 
 Dieses Projekt dient der Indexierung und Verwaltung von von Dateien. Aktuell ausgeprägt für Bilddateien.
-Es erzeugt Tabellen mit Metadaten, Bild- und Textdaten in einer PostgreSQL Datenbank
+Es erzeugt Tabellen mit Metadaten, Bild- und Textdaten in einer PostgreSQL Datenbank.
+Als weitere Ausbaustufe werden mit einem KI-Modell Einbettungen erzeugt und als Vektoren in der Datenbank
+gespeichert.
+Das Coding ist in Python3, mit uv als Paketmanager.
 
 ## Features
 
@@ -20,6 +23,19 @@ uv pip install .
 ```
 
 ## Nutzung
+
+Eine Dokumentation der API findet sich in [API](./doc/build/html/index.html)
+
+Vorgehen:
+
+    1. Konfiguration mit Hilfe von config.env
+    2. Anlegen der Datenbankstruktur mit db_init (to_do)
+    3. Einlesen der Metadaten der relevanten Dateien
+    4. Erzeugen der Dateitypspezifischen DB-Einträge
+    5. Generieren und Speichern der Embeddings
+    6. Query-Oberfläche für Suchen
+
+
 
 ```bash
 
