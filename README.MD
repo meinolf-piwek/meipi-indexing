@@ -25,7 +25,7 @@ uv pip install .
 
 ## Nutzung
 
-Eine Dokumentation der API findet sich in [API](./doc/singlehtml/index.html)
+Eine Dokumentation der API findet sich in [API](https://meipi-indexing.readthedocs.io/de/latest/autodoc/indexing.html)
 
 Vorgehen:
 
