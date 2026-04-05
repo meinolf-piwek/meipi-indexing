@@ -34,7 +34,7 @@ def create_image_batches(
     inputs = image_processor(images)
     batches = batched(inputs["pixel_values"], batch_size)
     return [
-        BatchFeature(data={"pixel_values": default_collate(batch)}) for batch in batches
+        BatchFeature(data={"pixel_values": default_collate(list(batch))}) for batch in batches
     ]
 
 

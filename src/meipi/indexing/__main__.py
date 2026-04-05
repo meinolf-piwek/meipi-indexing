@@ -20,11 +20,11 @@ def main():
     """Liest Dateien aus dem File-System, extrahiert Metadaten und Textinhalte
     und speichert sie in einer Pickle-Datei.
     """
-    filelist = [
-        root / file
+    filelist = (
+        str(root / file)
         for root, _, files in Path(appconf.docroot + "/mobile").walk()
-        for file in files
-    ]
+        for file in files)
+    
     batches = batched(filelist, n=1000)
     docs = []
     for batch in tqdm(batches):

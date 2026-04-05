@@ -16,7 +16,7 @@ sowie zur Durchführung von Volltextsuchen und Berechnung von Perceptual Hashes.
 
 import io
 import types
-from typing import Optional, Self
+from typing import Optional, Self, Sequence
 from PIL import Image
 import numpy as np
 from imagehash import phash
@@ -53,7 +53,9 @@ class PILArray(types.TypeDecorator):
     def python_type(self) -> type[np.ndarray]:
         return np.ndarray
 
-    def process_bind_param(self, value: np.ndarray, dialect):
+    def process_bind_param(self, value: np.ndarray|None, dialect):
+        if value is None:
+            return None
         bf = io.BytesIO()
         np.save(bf, value, allow_pickle=False)
         return bf.getvalue()
@@ -66,11 +68,11 @@ class PILArray(types.TypeDecorator):
             return None
         # return np.array(value,dtype=np.uint8).reshape(224,224,3)
 
-    def process_literal_param(self, value, dialect):
-        return self.process_bind_param(value, dialect)
+    def process_literal_param(self, value, dialect): #type: ignore
+        return None 
 
     def coerce_compared_value(self, op, value):
-        return self.impl.coerce_compared_value(op, value)
+        return self.impl.coerce_compared_value(op=op, value=value) #type: ignore
 
 
 class Base(MappedAsDataclass, DeclarativeBase):
@@ -81,12 +83,22 @@ class Base(MappedAsDataclass, DeclarativeBase):
     @classmethod
     def create_table(cls, session: Session) -> None:
         """Create the table in the database."""
-        cls.metadata.create_all(session.bind, tables=[cls.__table__])
+        if session.bind is None:
+            raise ValueError(
+                "Session is not bound to an engine. \
+                Ensure the session is properly configured."
+            )
+        cls.metadata.create_all(session.bind, tables=[cls.__table__]) #type: ignore
 
     @classmethod
     def drop_table(cls, session: Session) -> None:
         """Drop the table from the database."""
-        cls.metadata.drop_all(session.bind, tables=[cls.__table__])
+        if session.bind is None:
+            raise ValueError(
+                "Session is not bound to an engine. \
+                Ensure the session is properly configured."
+            )
+        cls.metadata.drop_all(session.bind, tables=[cls.__table__]) #type: ignore
 
     def as_dict(self):
         """Erzeugt Dictionary ohne _sa_instance_state"""
@@ -163,15 +175,17 @@ class DBDoc(Base, DBMetaMixin):
         deferred=True,
         doc="Inhalt des Textdokuments",
     )
-    ts_content = mapped_column(
+    ts_content: Mapped[TSVECTOR] = mapped_column(
         TSVECTOR,
         Computed("to_tsvector('%s', left(fname||inhalt,800000))" % _search_language),
+        default=None,
+        nullable=True,
         deferred=True,
         doc="Spezieller Indexvektor für Volltextsuche in postgresql",
     )
 
     @classmethod
-    def tsquery(cls: Self, query: str, session: Session, lang="german") -> list[Self]:
+    def tsquery(cls: type[Self], query: str, session: Session, lang="german") -> Sequence[Self]:
         """Perform a full-text search on the ts_content field."""
         stmt = select(cls).where(cls.ts_content.match(query, reg_conf=lang))
         return session.execute(stmt).scalars().all()
@@ -182,7 +196,7 @@ class DocVectorMixin(MappedAsDataclass):
 
     _vector_size = 0
     chunk_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    doc_id: Mapped[id] = mapped_column(ForeignKey("documents.id"))
+    doc_id: Mapped[int] = mapped_column(ForeignKey("documents.id"))
     content: Mapped[str] = mapped_column(TEXT, nullable=True)
 
     @declared_attr
@@ -234,17 +248,17 @@ class DBPic(Base, DBMetaMixin):
 
     def set_phash(self):
         if self.thumbarray is not None:
-            self.phash = self.calc_phash(self.thumb)
+            self.phash = self.calc_phash(self.thumb) #type: ignore
 
     @property
-    def thumb(self):
+    def thumb(self)-> Image.Image | None:
         if self.thumbarray is not None:
             return Image.fromarray(self.thumbarray)
         else:
             return None
 
     @classmethod
-    def calc_phash(cls, im: Image) -> bytes:
+    def calc_phash(cls, im: Image.Image) -> bytes:
         h = phash(im, cls._phash_size, cls._phash_high_freq)
         return bytes.fromhex(str(h))
 

@@ -7,6 +7,8 @@ from datetime import datetime
 import json
 from hashlib import file_digest
 from itertools import batched
+from pathlib import Path
+from typing import Iterable, Sequence
 from tqdm.auto import tqdm
 import tika.parser as tp
 import langchain_core.documents as lcd
@@ -16,7 +18,9 @@ from pillow_heif import register_heif_opener
 from nvidia import dali
 from nvidia.dali.fn import resize, pad
 from nvidia.dali.fn.readers import file as dali_file_reader
-from nvidia.dali.plugin.pytorch import DALIClassificationIterator, LastBatchPolicy
+from nvidia.dali.data_node import DataNode
+from nvidia.dali.plugin.base_iterator import LastBatchPolicy
+from nvidia.dali.plugin.pytorch import DALIClassificationIterator
 import cupy as cp
 from . import appconf
 from .db import DBDoc, DBPic, DBMeta
@@ -25,7 +29,7 @@ register_heif_opener()
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
-def get_DBMeta_from_file(file: str, docroot: str, pool: str) -> DBMeta:
+def get_DBMeta_from_file(file: str, docroot: str, pool: str) -> DBMeta|None:
     """
     Get DBMeta object from file path.
     Die Metadaten werden mit Tika extrahiert.
@@ -47,7 +51,6 @@ def get_DBMeta_from_file(file: str, docroot: str, pool: str) -> DBMeta:
         sha256 = file_digest(f, "sha256")
     try:
         dbmeta = DBMeta(
-            id=None,
             pool=pool,
             path=path,
             fname=os.path.basename(path),
@@ -73,22 +76,27 @@ def tika_get_meta(file: str) -> dict:
     Get metadata of a file using Tika. file, fdate und fsize kommen vom os
     """
     headers = {"X-Tika-OCRskipOcr": "true"}
+    
     try:
         parsed = tp.from_file(
             file, xmlContent=False, requestOptions={"headers": headers}
         )
-        parsed["metadata"]["file"] = file
-        parsed["metadata"]["fdate"] = datetime.fromtimestamp(
+        if not isinstance(parsed, dict):
+            appconf.logger.error("Unexpected Tika response type %s for %s", type(parsed), file)
+            return {}
+        meta: dict = parsed.get("metadata", {}) # type: ignore
+        meta["file"] = file 
+        meta["fdate"] = datetime.fromtimestamp( 
             os.path.getmtime(file)
         ).isoformat()
-        parsed["metadata"]["fsize"] = os.path.getsize(file)
+        meta["fsize"] = os.path.getsize(file) 
     except Exception as e:
         appconf.logger.error("Error %s parsing file %s", e, file)
-        return None
-    return parsed["metadata"]
+        return {}
+    return meta
 
 
-def tika_parse(files: list[str]) -> list[lcd.Document]:
+def tika_parse(files: Iterable[str]) -> list[lcd.Document]:
     """
     Parse a file using Tika and return the parsed content. file, fdate und fsize kommen vom os
     """
@@ -99,23 +107,27 @@ def tika_parse(files: list[str]) -> list[lcd.Document]:
             parsed = tp.from_file(
                 file, xmlContent=False, requestOptions={"headers": headers}
             )
-            parsed["metadata"]["file"] = file
-            parsed["metadata"]["fdate"] = datetime.fromtimestamp(
+            if not isinstance(parsed, dict):
+                appconf.logger.error("Unexpected Tika response type %s for %s", type(parsed), file)
+                return []
+            meta: dict = parsed.get("metadata", {}) # type: ignore
+            meta["file"] = file
+            meta["fdate"] = datetime.fromtimestamp(
                 os.path.getmtime(file)
             ).isoformat()
-            parsed["metadata"]["fsize"] = os.path.getsize(file)
+            meta["fsize"] = os.path.getsize(file)
             page_content = parsed.get("content", "")
             page_content = "" if not page_content else page_content
             doclist.append(
-                lcd.Document(page_content=page_content, metadata=parsed["metadata"])
+                lcd.Document(page_content=page_content, metadata=meta)
             )
         except Exception as e:
             appconf.logger.error("Error %s parsing file %s", e, file)
-            return None
+            return []
     return doclist
 
 
-def dbdoc_from_lcdoc(lcdoc: lcd.Document, docroot) -> DBDoc:
+def dbdoc_from_lcdoc(lcdoc: lcd.Document, docroot: str, pool: str) -> DBDoc|None:
     """Erzeuge DBDocumente aus LangChain Document"""
     meta: dict = lcdoc.metadata
     os_fdate: str = meta.get("fdate", datetime.now().isoformat())
@@ -128,7 +140,8 @@ def dbdoc_from_lcdoc(lcdoc: lcd.Document, docroot) -> DBDoc:
         content_length: int = content_length[0]
     try:
         dbdoc = DBDoc(
-            id=os.path.relpath(fpath, start=docroot),
+            pool=pool,
+            path=os.path.relpath(fpath, start=docroot),
             fname=os.path.basename(fpath),
             suffix=os.path.splitext(fpath)[1],
             fdate=os_fdate,
@@ -147,7 +160,7 @@ def dbdoc_from_lcdoc(lcdoc: lcd.Document, docroot) -> DBDoc:
         return dbdoc
 
 
-def dbpic_from_dbmeta(dbmeta: DBMeta, docroot: str) -> DBPic:
+def dbpic_from_dbmeta(dbmeta: DBMeta, docroot: str) -> DBPic|None:
     """
     Get DBPic object from DBMeta object.
     Das DBPic-Objekt enthält zusätzlich die XMP-Metadaten des Bildes.
@@ -182,7 +195,7 @@ class PILLoader(object):
     Eine Liste von Bildern als CuPy-Arrays und eine Liste von Labels als CuPy-Arrays.
     """
 
-    def __init__(self, files: list[str], labels: list[str], batch_size):
+    def __init__(self, files: Sequence[str], labels: Sequence[str], batch_size):
         assert len(files) == len(labels), "Length of files and labels do not match"
         self.batch_size = batch_size
         self.files = files
@@ -211,14 +224,14 @@ class DALIImageResizer:
     """
     def __init__(
         self,
-        files: list[str] = None,
-        labels: list[int] = None,
+        files: Sequence[str] = (),
+        labels: Sequence[int] = (),
         pipe_batch_size: int = 1,
         num_threads: int = 1,
         use_PIL: bool = False,
     ):
-        self.files = files if files else []
-        self.labels = labels if labels else []
+        self.files = files
+        self.labels = labels
         if len(self.files) != len(self.labels):
             raise ValueError("Files and labels must have the same length")
         self.pipe_batch_size = pipe_batch_size
@@ -244,11 +257,11 @@ class DALIImageResizer:
                 random_shuffle=False,
                 name="Reader",
             )
-            decoded = dali.fn.decoders.image(
+            decoded =dali.fn.decoders.image(
                 inp, device="mixed", output_type=dali.types.DALIImageType.RGB
             )
-            resized = resize(decoded, resize_longer=224)
-            padded = pad(resized, axes=(0, 1), shape=(224, 224))
+            resized = resize(decoded, resize_longer=224) 
+            padded = pad(resized, axes=(0, 1), shape=(224, 224))  #type: ignore
             return padded, label
 
         return pipe
@@ -273,15 +286,15 @@ class DALIImageResizer:
         def pipe():
             decoded, label = dali.fn.external_source(source=extiter, num_outputs=2)
             resized = resize(decoded, resize_longer=224)
-            padded = pad(resized, axes=(0, 1), shape=(224, 224))
+            padded = pad(resized, axes=(0, 1), shape=(224, 224)) #type: ignore
             return padded, label
 
         return pipe
 
     def process(
         self,
-        files: list[str] = None,
-        labels: list[int] = None,
+        files: Sequence[str],
+        labels: Sequence[int],
         batch_size: int = 1,
         # pkl_file: str=None,
         show_progress: bool = False,
@@ -321,16 +334,16 @@ class DALIImageResizer:
 
     def process_batched(
         self,
-        files: list[str] = None,
-        labels: list[int] = None,
+        files: Sequence[str]|tuple[()] = (),
+        labels: Sequence[int]|tuple[()] = (),
         batch_size: int = 1,
         show_progress: bool = False,
     ) -> tuple[list, list, list, list]:
         """Verabeitet die Pipeline in Batches und gibt die Ergebnisse zurück.
         Rückgabe: (Bilder, Labels, Fehlerdateipfade, Fehlerlabels)"""
-        if files is None:
+        if files == ():
             files = self.files
-        if labels is None:
+        if labels == ():
             labels = self.labels
         if len(files) != len(labels):
             raise ValueError("Files and labels must have the same length")

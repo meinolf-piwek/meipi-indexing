@@ -13,8 +13,8 @@ class pgEngine:
         db_conn_string,
         metadata=ModelBase.metadata,
         logger: Logger = Logger("sqlalchemy.engine", level=INFO),
-        enginekwargs: dict = None,
-        sessionkwargs: dict = None,
+        enginekwargs: dict = {},
+        sessionkwargs: dict|None = None,
     ):
         enginekwargs = {} if not enginekwargs else enginekwargs
         sessionkwargs = {} if not sessionkwargs else sessionkwargs
@@ -39,7 +39,7 @@ class pgEngine:
     def get_session(self, **kwargs)-> Session:
         return self.Session(**kwargs)
 
-    def bulk_insert(self, TableClass: ModelBase, data: list[dict]):
+    def bulk_insert(self, TableClass: type[ModelBase], data: list[dict]):
         """Insert a list of data into the database."""
         with self.get_session(expire_on_commit=False) as session:
             try:

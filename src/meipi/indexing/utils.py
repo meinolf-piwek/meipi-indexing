@@ -79,7 +79,7 @@ def resize_pics(piclist: PicList, batch_size: int, pipe_batch_size: int, use_PIL
     batches = batched(piclist, batch_size)
     grespics, greslabels, gerrfiles, gerrlabels = ([], [], [], [])
     for batch in tqdm(batches, total=(len(piclist) // batch_size)):
-        files, labels = zip(*batch)
+        files, labels= zip(*batch)
         respics, reslabels, errfiles, errlabels = image_resizer.process(
             files=files, labels=labels, batch_size=batch_size, show_progress=False
         )

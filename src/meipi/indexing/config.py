@@ -25,6 +25,7 @@ import os
 import logging
 from contextlib import suppress
 from dataclasses import dataclass
+from typing import Sequence
 from dotenv import load_dotenv
 import keyring
 from keyring.backends.SecretService import Keyring as SecretServiceKeyring
@@ -42,7 +43,7 @@ class Config:
     datadir: str
     docroot: str
     logger: logging.Logger = logging.Logger("sqlalchemy.engine", logging.INFO)
-    docsuf: tuple[str] = (
+    docsuf: Sequence[str] = (
         ".pdf",
         ".txt",
         ".md",
@@ -53,11 +54,11 @@ class Config:
         ".epub",
         ".odt",
     )
-    picsuf: tuple[str] = (".jpg", ".jpeg", ".bmp", ".png", ".heic", ".tiff", ".tif")
-    vidsuf: tuple[str] = (".mov", ".vob", ".mkv", ".avi", ".mp4", ".mcf")
+    picsuf: Sequence[str] = (".jpg", ".jpeg", ".bmp", ".png", ".heic", ".tiff", ".tif")
+    vidsuf: Sequence[str] = (".mov", ".vob", ".mkv", ".avi", ".mp4", ".mcf")
 
     @staticmethod
-    def get_db_passwd() -> str:
+    def get_db_passwd() -> str|None:
         """DB Password aus Keyring holen, oder Default-Wert verwenden"""
         api_key = os.getenv("PG_API_KEY", "pg-docker")
         keyring.set_keyring(SecretServiceKeyring())
@@ -102,7 +103,7 @@ class Config:
             vidsuf=vidsuf,
         )
 
-    def get_ftype(self, suf: str) -> str:
+    def get_ftype(self, suf: str) -> str|None:
         """Gibt den konfigurierten Dateityp zurück, basierend auf der Dateiendung"""
         _suf = suf.lower()
         if _suf in self.docsuf:
