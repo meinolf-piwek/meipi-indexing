@@ -24,7 +24,7 @@ uv pip install .
 
 ## Nutzung
 
-Eine Dokumentation der API findet sich in [API](./doc/build/html/index.html)
+Eine Dokumentation der API findet sich in [API](./doc/singlehtml/index.html)
 
 Vorgehen:
 
