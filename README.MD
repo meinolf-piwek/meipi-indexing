@@ -1,5 +1,6 @@
 # Meipi Indexing
 
+!!! Work in progress !!!
 Dieses Projekt dient der Indexierung und Verwaltung von von Dateien. Aktuell ausgeprägt für Bilddateien.
 Es erzeugt Tabellen mit Metadaten, Bild- und Textdaten in einer PostgreSQL Datenbank.
 Als weitere Ausbaustufe werden mit einem KI-Modell Einbettungen erzeugt und als Vektoren in der Datenbank
@@ -47,7 +48,7 @@ Bearbeite die Datei `config.json`, um die Einstellungen anzupassen.
 
 ## Mitwirken
 
-Pull Requests und Issues sind willkommen!
+Issues sind willkommen!
 
 ## Lizenz
 
