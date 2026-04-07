@@ -6,6 +6,8 @@ ihre Metadaten sowie Vector-Einbettungen werden in einer Postgres-DB gespeichert
 
 from .config import Config
 
-__all__ = ["Config"]
+
+__all__ = ["Config", 
+           "appconf"]
 __version__ = "0.0.1"
 appconf:Config = Config.from_env_file()

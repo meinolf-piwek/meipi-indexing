@@ -23,6 +23,7 @@ dependencies = [
     "pillow>=11.3.0",
     "pillow-heif>=1.1.0",
     "psycopg>=3.2.10",
+    "pydantic-settings>=2.13.1",
     "pylint-pydantic>=0.4.1",
     "python-xmp-toolkit>=2.0.2",
     "sentence-transformers>=5.1.0",
