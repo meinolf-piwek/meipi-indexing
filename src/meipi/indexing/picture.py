@@ -1,18 +1,16 @@
-"""Load and preprocess documents"""
+""" Modul zum Laden und Vorverarbeiten von Bildern mit DALI.
+    Es können Bilder mit DALI oder PIL geladen werden.
+    Die Bilder werden auf eine Größe von 224x224 skaliert und gepaddet.
+    Die Funktion process() verarbeitet die Bilder in Batches und gibt die Ergebnisse zurück.
+    Eingabe: Liste von Dateipfaden und Labels, Batchgröße in der Pipeline, Zahl der Threads.
+    Ausgabe: Tupel aus vier Listen: (Bilder, Labels, Fehlerdateipfade, Fehlerlabels)
+    
+"""
+__all__ = ["PILLoader", "DALIImageResizer", "resize_pics"]
 
-# pylint: disable=W0718
-# pylint: disable=C0103
-import os
-from datetime import datetime
-import json
-from hashlib import file_digest
+from typing import List, Tuple, Sequence
 from itertools import batched
-from pathlib import Path
-from typing import Iterable, Sequence
 from tqdm.auto import tqdm
-import tika.parser as tp
-import langchain_core.documents as lcd
-from libxmp.utils import file_to_dict
 from PIL import Image, ImageFile
 from pillow_heif import register_heif_opener
 from nvidia import dali
@@ -22,171 +20,10 @@ from nvidia.dali.data_node import DataNode
 from nvidia.dali.plugin.base_iterator import LastBatchPolicy
 from nvidia.dali.plugin.pytorch import DALIClassificationIterator
 import cupy as cp
-from . import appconf
-from .db import DBDoc, DBPic, DBMeta
+from .model import IdList
 
 register_heif_opener()
 ImageFile.LOAD_TRUNCATED_IMAGES = True
-
-
-def get_DBMeta_from_file(file: str, docroot: str, pool: str) -> DBMeta|None:
-    """
-    Get DBMeta object from file path.
-    Die Metadaten werden mit Tika extrahiert.
-    Aus Listen von Metadaten wird der erste Eintrag verwendet.
-    Es wird der SHA256-Hash des Dokuments berechnet.
-    Die Funktion gibt ein DBMeta-Objekt zurück, das die Metadaten des Dokuments enthält.
-    """
-    meta = tika_get_meta(file)
-    meta = json.loads(json.dumps(meta).replace("\\u0000", "null"))
-    path = file.replace(docroot, "")
-    os_fdate: str = meta.get("fdate", datetime.now().isoformat())
-    doc_cdate: str = meta.get("dcterms:created", None)
-    content_length = meta.get("Content-Length", 0)
-    if isinstance(content_length, list):
-        content_length: int = content_length[0]
-    if isinstance(doc_cdate, list):
-        doc_cdate: str = doc_cdate[0]
-    with open(file, "rb") as f:
-        sha256 = file_digest(f, "sha256")
-    try:
-        dbmeta = DBMeta(
-            pool=pool,
-            path=path,
-            fname=os.path.basename(path),
-            fdate=os_fdate,
-            sort_date=os_fdate if doc_cdate is None else doc_cdate,
-            fsize=meta.get("fsize", 0),
-            clength=content_length,
-            ctype=meta.get("Content-Type", "unk/unk"),
-            md_keys=list(meta.keys()),
-            suffix=os.path.splitext(path)[1],
-            sha256=sha256.digest(),
-            meta_data=meta,
-        )
-    except Exception as e:
-        appconf.logger.error("Error %s creating DBMeta fpath %s", e, file)
-        return None
-    else:
-        return dbmeta
-
-
-def tika_get_meta(file: str) -> dict:
-    """
-    Get metadata of a file using Tika. file, fdate und fsize kommen vom os
-    """
-    headers = {"X-Tika-OCRskipOcr": "true"}
-    
-    try:
-        parsed = tp.from_file(
-            file, xmlContent=False, requestOptions={"headers": headers}
-        )
-        if not isinstance(parsed, dict):
-            appconf.logger.error("Unexpected Tika response type %s for %s", type(parsed), file)
-            return {}
-        meta: dict = parsed.get("metadata", {}) # type: ignore
-        meta["file"] = file 
-        meta["fdate"] = datetime.fromtimestamp( 
-            os.path.getmtime(file)
-        ).isoformat()
-        meta["fsize"] = os.path.getsize(file) 
-    except Exception as e:
-        appconf.logger.error("Error %s parsing file %s", e, file)
-        return {}
-    return meta
-
-
-def tika_parse(files: Iterable[str]) -> list[lcd.Document]:
-    """
-    Parse a file using Tika and return the parsed content. file, fdate und fsize kommen vom os
-    """
-    headers = {"X-Tika-OCRskipOcr": "true"}
-    doclist = []
-    for file in files:
-        try:
-            parsed = tp.from_file(
-                file, xmlContent=False, requestOptions={"headers": headers}
-            )
-            if not isinstance(parsed, dict):
-                appconf.logger.error("Unexpected Tika response type %s for %s", type(parsed), file)
-                return []
-            meta: dict = parsed.get("metadata", {}) # type: ignore
-            meta["file"] = file
-            meta["fdate"] = datetime.fromtimestamp(
-                os.path.getmtime(file)
-            ).isoformat()
-            meta["fsize"] = os.path.getsize(file)
-            page_content = parsed.get("content", "")
-            page_content = "" if not page_content else page_content
-            doclist.append(
-                lcd.Document(page_content=page_content, metadata=meta)
-            )
-        except Exception as e:
-            appconf.logger.error("Error %s parsing file %s", e, file)
-            return []
-    return doclist
-
-
-def dbdoc_from_lcdoc(lcdoc: lcd.Document, docroot: str, pool: str) -> DBDoc|None:
-    """Erzeuge DBDocumente aus LangChain Document"""
-    meta: dict = lcdoc.metadata
-    os_fdate: str = meta.get("fdate", datetime.now().isoformat())
-    doc_cdate: str = meta.get("dcterms:created", "1990-01-01T00:00:00")
-    if isinstance(doc_cdate, list):
-        doc_cdate: str = doc_cdate[0]
-    fpath: str = meta.get("file", "")
-    content_length = meta.get("Content-Length", 0)
-    if isinstance(content_length, list):
-        content_length: int = content_length[0]
-    try:
-        dbdoc = DBDoc(
-            pool=pool,
-            path=os.path.relpath(fpath, start=docroot),
-            fname=os.path.basename(fpath),
-            suffix=os.path.splitext(fpath)[1],
-            fdate=os_fdate,
-            sort_date=os_fdate if doc_cdate is None else doc_cdate,
-            fsize=meta.get("fsize", 0),
-            clength=content_length,
-            ctype=meta.get("Content-Type", "unk/unk"),
-            md_keys=list(meta.keys()),
-            inhalt=lcdoc.page_content if lcdoc.page_content else "",
-            meta_data=meta,
-        )
-    except Exception as e:
-        appconf.logger.error("Error %s creating DBDoc fpath %s", e, fpath)
-        return None
-    else:
-        return dbdoc
-
-
-def dbpic_from_dbmeta(dbmeta: DBMeta, docroot: str) -> DBPic|None:
-    """
-    Get DBPic object from DBMeta object.
-    Das DBPic-Objekt enthält zusätzlich die XMP-Metadaten des Bildes.
-    Der Pfad kommt aus dem DBMeta-Objekt.
-    Die XMP-Metadaten werden mit libxmp extrahiert.
-    Aus Listen von Metadaten wird der erste Eintrag verwendet.
-    """
-    try:
-        xmp = file_to_dict(docroot + dbmeta.path)
-        xmpdict = dict(
-            [
-                (a, b.replace("\\u0000", "null"))
-                for data in xmp.values()
-                for a, b, _ in data
-            ]
-        )
-        dbpic = DBPic(
-            **dbmeta.as_dict(),
-            xmp=xmpdict,
-        )
-    except Exception as e:
-        appconf.logger.error("Error %s creating DBPic fpath %s", e, dbmeta.path)
-        return None
-    else:
-        return dbpic
-
 
 class PILLoader(object):
     """PIL Loader for DALI External Source.
@@ -381,3 +218,34 @@ class DALIImageResizer:
         errlabels = [x[1] for x in err if x[1] not in reslabels]
         errfiles = [x[0] for x in err if x[1] in errlabels]
         return respics, reslabels, errfiles, errlabels
+
+
+def resize_pics(piclist: IdList, batch_size: int, pipe_batch_size: int, use_PIL: bool)-> Tuple[
+    List[bytes], List[int], List[str], List[int]]:
+    """Erstellt Thumbnails für die Bilder in piclist
+
+    Args:
+        piclist (IdList): Liste von Paaren aus Dateipfad und id
+        batch_size (int): Anzahl der Bilder, die in einem Batch verarbeitet werden sollen
+        pipe_batch_size (int): Anzahl Bilder pro Batch, die an die DALI-Pipeline übergeben werden sollen
+        use_PIL (bool): Ob die Thumbnails mit PIL erstellt werden sollen (True) oder mit DALI (False)
+
+    Returns:
+        Tuple[List[bytes], List[int], List[str], List[int]]: Vier Listen: 1. Thumbnails als Byte-Arrays, 
+        2. zugehörige ids, 3. Pfad der fehlgeschlagene Bilder, 4. ids der fehlgeschlagenen Bilder   
+    """
+    image_resizer = DALIImageResizer(
+        pipe_batch_size=pipe_batch_size, num_threads=4, use_PIL=use_PIL
+    )
+    batches = batched(piclist, batch_size)
+    grespics, greslabels, gerrfiles, gerrlabels = ([], [], [], [])
+    for batch in tqdm(batches, total=(len(piclist) // batch_size)):
+        files, labels= zip(*batch)
+        respics, reslabels, errfiles, errlabels = image_resizer.process(
+            files=files, labels=labels, batch_size=batch_size, show_progress=False
+        )
+        grespics.extend(respics)
+        greslabels.extend(reslabels)
+        gerrfiles.extend(errfiles)
+        gerrlabels.extend(errlabels)
+    return grespics, greslabels, gerrfiles, gerrlabels
