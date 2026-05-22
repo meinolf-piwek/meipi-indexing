@@ -15,8 +15,8 @@ sowie zur Durchführung von Volltextsuchen und Berechnung von Perceptual Hashes.
 #TODO: Tabellen für Dokumenten- und Bildvektoren, die von Embedder-Modellen erstellt werden, hinzufügen
 
 import io
-import types
-from typing import Optional, Self, Sequence
+#import types
+from typing import Optional, Self, Sequence, List, Tuple
 from PIL import Image
 import numpy as np
 from imagehash import phash
@@ -30,12 +30,14 @@ from sqlalchemy.orm import (
     mapped_column,
     MappedAsDataclass,
     declared_attr,
-    Session,
+    Session
 )
-from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, BYTEA
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, BYTEA, BIGINT
 from sqlalchemy.schema import Computed
 from pgvector.sqlalchemy import Vector
+from . import appconf
 
+#type IdList = List[Tuple[str, int]]  # List of tuples (file path, id)
 
 class PILArray(types.TypeDecorator):
     """
@@ -78,7 +80,7 @@ class PILArray(types.TypeDecorator):
 class Base(MappedAsDataclass, DeclarativeBase):
     """Base class for SQLAlchemy models."""
 
-    metadata = MetaData("public")
+    metadata = MetaData(appconf.pg_schema)
 
     @classmethod
     def create_table(cls, session: Session) -> None:
@@ -106,31 +108,64 @@ class Base(MappedAsDataclass, DeclarativeBase):
         data.pop("_sa_instance_state", "")  # Remove SQLAlchemy state
         return data
 
+class DBPool(Base):
+    """SQLAlchemy model for data pools stored in PostgreSQL.
+    
+    Diese Tabelle dient zur Verwaltung von Datenpools, die als logische Gruppen von Dateien definiert werden können.
+    Ein Datenpool könnte beispielsweise ein bestimmtes Anwendungsgebiet oder eine Kategorie von Dateien repräsentieren
+    """
 
-class DBMetaMixin(MappedAsDataclass):
-    """Mixin für Meta-Daten Felder"""
+    __tablename__ = "datapools"
+    __table_args__ = (Index("ix_datapools_pool", "pool", unique=True),)
 
+    id: Mapped[int] = mapped_column(
+        primary_key=True, autoincrement=True, sort_order=0
+    )
     pool: Mapped[str] = mapped_column(
+        nullable=False, unique=True, doc="Name of the data pool"
+    )
+    rootpath: Mapped[str] = mapped_column(
+        nullable=False, doc="Root path for the data pool, used to resolve file paths"
+    )
+    description: Mapped[Optional[str]] = mapped_column(
+        nullable=True, doc="Optional description of the data pool"
+    )
+
+
+class DBMeta(Base):
+    """SQLAlchemy model for Meta data stored in PostgreSQL."""
+
+    __tablename__ = "filemeta"
+    __table_args__ = (Index("ix_filemeta_sha256", "sha256"),
+                    Index("ix_filemeta_path", "pool_id","path", unique=True),)
+
+    id: Mapped[int] = mapped_column(
+        primary_key=True, autoincrement=True, sort_order=0,
+            )
+    pool_id: Mapped[int] = mapped_column(ForeignKey("datapools.id"),
         nullable=False, doc="Anwendungsgebiet, Datenpool, frei definierbar"
     )
     path: Mapped[str] = mapped_column(
         nullable=False,
-        unique=True,
+        #unique=True,
         doc="Pfad zur Datei, relativ zu einem root-Verzeichnis",
     )
     fname: Mapped[str] = mapped_column(nullable=False, doc="Dateiname")
     suffix: Mapped[str] = mapped_column(nullable=False, doc="Dateisuffix, incl. dot")
-    sort_date: Mapped[str] = mapped_column(
+    sort_date: Mapped[DateTime] = mapped_column(
         DateTime(), nullable=False, doc="Datum für Sortierung"
     )
-    fdate: Mapped[str] = mapped_column(
+    fdate: Mapped[DateTime] = mapped_column(
         DateTime(), nullable=False, doc="Dateidatum des Systems"
     )
-    fsize: Mapped[int] = mapped_column(nullable=False, doc="Dateigröße des Systems")
-    clength: Mapped[int] = mapped_column(
+    fsize: Mapped[int] = mapped_column(BIGINT, nullable=False, doc="Dateigröße des Systems")
+    clength: Mapped[int] = mapped_column( BIGINT,
         nullable=False, doc="Content-length, aus Metadaten"
     )
-    ctype: Mapped[str] = mapped_column(nullable=False, doc="Content type aus metadaten")
+    ctype: Mapped[str] = mapped_column(nullable=False,
+                        doc="Content type aus metadaten")
+    ftype: Mapped[str] = mapped_column(nullable=False,
+                        doc="Dateityp, konfiguriert in config.py")
     md_keys: Mapped[Optional[list[str]]] = mapped_column(
         JSONB, nullable=True, doc="Schlüssel der Metadaten"
     )
@@ -140,20 +175,14 @@ class DBMetaMixin(MappedAsDataclass):
     sha256: Mapped[Optional[bytes]] = mapped_column(
         BYTEA, nullable=True, default=None, doc="FileHash"
     )
+    doc: Mapped[Optional["DBDoc"]] = relationship(back_populates="meta",
+                                    cascade = "delete", passive_deletes=True, default= None)
+    pic: Mapped[Optional["DBPic"]] = relationship(back_populates="meta",
+                                    cascade = "delete", passive_deletes=True, default= None)
+    vid: Mapped[Optional["DBVid"]] = relationship(back_populates="meta",
+                                    cascade = "delete", passive_deletes=True, default= None)
 
-
-class DBMeta(Base, DBMetaMixin):
-    """SQLAlchemy model for Meta data stored in PostgreSQL."""
-
-    __tablename__ = "filemeta"
-    __table_args__ = (Index("ix_filemeta_sha256", "sha256"),)
-
-    id: Mapped[int] = mapped_column(
-        primary_key=True, autoincrement=True, sort_order=0, default=None
-    )
-
-
-class DBDoc(Base, DBMetaMixin):
+class DBDoc(Base):
     """SQLAlchemy model for text documents stored in PostgreSQL.
     
     Es enthält ein spezielles Feld ts_content, das als TSVECTOR definiert ist und eine
@@ -164,9 +193,12 @@ class DBDoc(Base, DBMetaMixin):
     __tablename__ = "documents"
     _search_language = "german"
 
-    id: Mapped[int] = mapped_column(
-        primary_key=True, autoincrement=True, sort_order=0, default=None
-    )
+    id: Mapped[int] = mapped_column(ForeignKey("filemeta.id",ondelete="CASCADE"),
+        primary_key=True, sort_order=0,
+        )
+    
+    meta: Mapped["DBMeta"] = relationship(back_populates="doc")
+    
     inhalt: Mapped[str] = mapped_column(
         TEXT,
         default="",
@@ -175,9 +207,10 @@ class DBDoc(Base, DBMetaMixin):
         deferred=True,
         doc="Inhalt des Textdokuments",
     )
+    
     ts_content: Mapped[TSVECTOR] = mapped_column(
         TSVECTOR,
-        Computed("to_tsvector('%s', left(fname||inhalt,800000))" % _search_language),
+        Computed("to_tsvector('%s', inhalt)" % _search_language),
         default=None,
         nullable=True,
         deferred=True,
@@ -191,6 +224,67 @@ class DBDoc(Base, DBMetaMixin):
         return session.execute(stmt).scalars().all()
 
 
+class DBPic(Base):
+    """SQLAlchemy model for Picture data stored in PostgreSQL.
+    
+    Es enthält neben den Datei-Metadaten Felder für XMP-Metadaten, 
+    ein Thumbnail als numpy array und einen Perceptual Hash.
+    Die eigentlichen Bilddaten werden nicht in der Datenbank gespeichert, sondern nur die Metadaten und der Hash.
+    Die Methode set_phash berechnet den Perceptual Hash basierend auf dem Thumbnail, falls dieses vorhanden ist. 
+    Der Perceptual Hash wird als BYTEA gespeichert, um eine effiziente Speicherung und Suche zu ermöglichen. 
+    Es wird ein Index auf dem phash-Feld erstellt, um schnelle Ähnlichkeitssuchen zu ermöglichen.
+    """
+
+    __tablename__ = "pictures"
+    __table_args__ = (Index("ix_pictures_phash", "phash"),)
+    _phash_size = 8
+    _phash_high_freq = 2
+
+    id: Mapped[int] = mapped_column(ForeignKey("filemeta.id", ondelete="CASCADE"),
+        primary_key=True, autoincrement=True, sort_order=0, default=None
+    )
+    xmp: Mapped[Optional[dict]] = mapped_column(
+        JSONB, default=None, doc="XMP-attributes of the image"
+    )
+    truncated: Mapped[Optional[bool]] = mapped_column(
+        default=None, doc="Whether original image is truncated"
+    )
+    thumbarray: Mapped[Optional[np.ndarray]] = mapped_column(
+        PILArray, nullable=True, default=None, doc="Thumbnail 224x224x3 as ndarray"
+    )
+    phash: Mapped[Optional[bytes]] = mapped_column(
+        BYTEA, default=None, doc="Perceptual hash as bytes"
+    )
+    meta: Mapped[Optional["DBMeta"]] = relationship(back_populates="pic",
+                                    default= None)
+
+    def set_phash(self):
+        if self.thumbarray is not None:
+            thumb_image = Image.fromarray(self.thumbarray)
+            self.phash = self.calc_phash(thumb_image)
+
+    @property
+    def thumb(self)-> Image.Image | None:
+        if self.thumbarray is not None:
+            return Image.fromarray(self.thumbarray)
+        else:
+            return None
+
+    @classmethod
+    def calc_phash(cls, im: Image.Image) -> bytes:
+        h = phash(im, cls._phash_size, cls._phash_high_freq)
+        return bytes.fromhex(str(h))
+
+
+class DBVid(Base):
+    """SQLAlchemy model for Video data stored in PostgreSQL."""
+    __tablename__ = "videos"
+    id: Mapped[int] = mapped_column(ForeignKey("filemeta.id",ondelete="CASCADE"),
+        primary_key=True, autoincrement=True, sort_order=0, default=None
+    )
+    meta: Mapped[Optional["DBMeta"]] = relationship(back_populates="vid",
+                                    default= None)
+    
 class DocVectorMixin(MappedAsDataclass):
     """Mixin für DocVectorTables"""
 
@@ -212,55 +306,6 @@ class DocVectorMixin(MappedAsDataclass):
         cls,
     ) -> Mapped[DBDoc]:
         return relationship()
-
-
-class DBPic(Base, DBMetaMixin):
-    """SQLAlchemy model for Picture data stored in PostgreSQL.
-    
-    Es enthält neben den Datei-Metadaten Felder für XMP-Metadaten, 
-    ein Thumbnail als numpy array und einen Perceptual Hash.
-    Die eigentlichen Bilddaten werden nicht in der Datenbank gespeichert, sondern nur die Metadaten und der Hash.
-    Die Methode set_phash berechnet den Perceptual Hash basierend auf dem Thumbnail, falls dieses vorhanden ist. 
-    Der Perceptual Hash wird als BYTEA gespeichert, um eine effiziente Speicherung und Suche zu ermöglichen. 
-    Es wird ein Index auf dem phash-Feld erstellt, um schnelle Ähnlichkeitssuchen zu ermöglichen.
-    """
-
-    __tablename__ = "pictures"
-    __table_args__ = (Index("ix_pictures_phash", "phash"),)
-    _phash_size = 8
-    _phash_high_freq = 2
-
-    id: Mapped[int] = mapped_column(
-        primary_key=True, autoincrement=True, sort_order=0, default=None
-    )
-    xmp: Mapped[Optional[dict]] = mapped_column(
-        JSONB, default=None, doc="XMP-attributes of the image"
-    )
-    truncated: Mapped[Optional[bool]] = mapped_column(
-        default=None, doc="Whether original image is truncated"
-    )
-    thumbarray: Mapped[Optional[np.ndarray]] = mapped_column(
-        PILArray, nullable=True, default=None, doc="Thumbnail 224x224x3 as ndarray"
-    )
-    phash: Mapped[Optional[bytes]] = mapped_column(
-        BYTEA, default=None, doc="Perceptual hash as bytes"
-    )
-
-    def set_phash(self):
-        if self.thumbarray is not None:
-            self.phash = self.calc_phash(self.thumb) #type: ignore
-
-    @property
-    def thumb(self)-> Image.Image | None:
-        if self.thumbarray is not None:
-            return Image.fromarray(self.thumbarray)
-        else:
-            return None
-
-    @classmethod
-    def calc_phash(cls, im: Image.Image) -> bytes:
-        h = phash(im, cls._phash_size, cls._phash_high_freq)
-        return bytes.fromhex(str(h))
 
 
 class PicVectorMixin(MappedAsDataclass):
@@ -286,5 +331,5 @@ class PicVectorMixin(MappedAsDataclass):
 class DBDinoV2Vector(Base, PicVectorMixin):
     """SQLAlchemy model for DINO V2 image embeddings stored in PostgreSQL."""
 
-    __tablename__ = "dino_v2 vectors"
+    __tablename__ = "dino_v2_vectors"
     _vector_size = 1024  # Größe des Vektors für DINO-Modelle
