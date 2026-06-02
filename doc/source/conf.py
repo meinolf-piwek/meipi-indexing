@@ -17,13 +17,23 @@ release = '0.0.1'
 
 sys.path.append(str(Path("../..", "src").resolve()))
 
-extensions = ['sphinx.ext.autosummary', 'sphinx.ext.napoleon', 'sphinx.ext.viewcode', 'sphinx.ext.autodoc']
+extensions = [
+    'sphinx.ext.autosummary',
+    'sphinx.ext.napoleon',
+    'sphinx.ext.viewcode',
+    'sphinx.ext.autodoc',
+    'sphinx.ext.intersphinx',
+]
 autodoc_mock_imports = ['nvidia.dali']
 autosummary_generate = True
 autodoc_default_options = {
     "members": True,
     "undoc-members": True,
     "show-inheritance": True,
+}
+intersphinx_mapping = {
+    "python": ("https://docs.python.org/3", None),
+    "sqlalchemy": ("https://docs.sqlalchemy.org/en/20/", None),
 }
 
 templates_path = ['_templates']

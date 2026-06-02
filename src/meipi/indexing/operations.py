@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Database and filesystem operations for indexing workflows.
 
 ``DBOperations`` wraps SQLAlchemy session/engine handling and higher-level

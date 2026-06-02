@@ -1,25 +1,69 @@
 meipi.indexing package
 ======================
 
-Diese Seite beschreibt die wichtigsten Module des Pakets
-``meipi.indexing`` ohne Laufzeit-Importe waehrend des Sphinx-Builds.
-Damit bleibt die Dokumentation auch in Umgebungen ohne volle Runtime-
-Abhaengigkeiten stabil.
-
-Kernmodule
+Submodules
 ----------
 
-- ``meipi.indexing.config``: App-Konfiguration (ENV/Keyring/DB-URL)
-- ``meipi.indexing.model``: SQLAlchemy-Modelle fuer Pools, File-Metadaten und Typ-Tabellen
-- ``meipi.indexing.operations``: DB-Workflows und asynchrone Datei-Verarbeitung
-- ``meipi.indexing.search``: PostgreSQL-Volltextsuche
-- ``meipi.indexing.picture``: Thumbnail-Generierung und Bild-Resize-Pipeline
-- ``meipi.indexing.embedding``: Batching und Erzeugung von Bild-Embeddings
-- ``meipi.indexing.srcdocs``: experimentelle Speicherung binaerer Bilddaten
-- ``meipi.indexing.langchain``: veraltete Integrationsreste
+meipi.indexing.config module
+----------------------------
 
-Hinweis zum API-Build
----------------------
+.. automodule:: meipi.indexing.config
+   :members:
+   :show-inheritance:
+   :undoc-members:
 
-Fuer echte autodoc-Ausgaben mit importierten Symbolen sollte der Build in der
-Projektumgebung mit allen Abhaengigkeiten laufen, z.B. mit ``uv run``.
+meipi.indexing.model module
+---------------------------
+
+.. automodule:: meipi.indexing.model
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+meipi.indexing.operations module
+--------------------------------
+
+.. automodule:: meipi.indexing.operations
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+meipi.indexing.search module
+----------------------------
+
+.. automodule:: meipi.indexing.search
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+meipi.indexing.picture module
+-----------------------------
+
+.. automodule:: meipi.indexing.picture
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+meipi.indexing.embedding module
+-------------------------------
+
+.. automodule:: meipi.indexing.embedding
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+meipi.indexing.srcdocs module
+-----------------------------
+
+.. automodule:: meipi.indexing.srcdocs
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+meipi.indexing.langchain module
+-------------------------------
+
+.. automodule:: meipi.indexing.langchain
+   :members:
+   :show-inheritance:
+   :undoc-members:
