@@ -24,7 +24,25 @@ extensions = [
     'sphinx.ext.autodoc',
     'sphinx.ext.intersphinx',
 ]
-autodoc_mock_imports = ['nvidia.dali']
+autodoc_mock_imports = [
+    'cupy',
+    'libxmp',
+    'nvidia',
+    'nvidia.dali',
+    'nvidia.dali.fn',
+    'nvidia.dali.fn.readers',
+    'nvidia.dali.data_node',
+    'nvidia.dali.plugin',
+    'nvidia.dali.plugin.base_iterator',
+    'nvidia.dali.plugin.pytorch',
+    'pillow_heif',
+    'torch',
+    'torch.utils',
+    'torch.utils.data',
+    'torchvision',
+    'transformers',
+    'transformers.image_utils',
+]
 autosummary_generate = True
 autodoc_default_options = {
     "members": True,
