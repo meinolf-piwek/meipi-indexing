@@ -1,37 +1,78 @@
-"""Hauptfunktion, nur temporär interessant.
+"""Bulk ingest workflows used by the CLI."""
 
-Hier sollen später die Funktionen zum Einlesen von Dokumenten, 
-Bildern und Videos in die DB aufgerufen werden.
-"""
+from __future__ import annotations
 
-# TODO: Das hier soll später in eine CLI oder API umgewandelt werden.
-from pathlib import Path
-from itertools import batched
-from pickle import dump
-from tqdm import tqdm
 import asyncio
+from itertools import batched
 
-from .. import appconf, DBOperations, DBPool, AsyncFileOperations
+import sqlalchemy as sa
+from tqdm.auto import tqdm
+
+from .. import appconf
+from ..config import Config
+from ..model import DBMeta, DBPool
+from ..operations import AsyncFileOperations, DBOperations
 
 
+async def read_files_bulk(
+    *,
+    pool_id: int | None = None,
+    pool: DBPool | None = None,
+    relpath: str,
+    batchsize: int = 500,
+    incremental: bool = True,
+    update_thumbs: bool = True,
+    config: Config = appconf,
+) -> None:
+    """Read files from the filesystem, extract metadata, and store them in the DB.
 
-async def read_meta_bulk(pool:DBPool, relpath: str, pickle: bool=False):
-    """Liest Dateien aus dem File-System, extrahiert Metadaten und Textinhalte
-    und speichert sie in einer Pickle-Datei.
+    Args:
+        pool_id: Id of an existing datapool row (preferred for CLI usage).
+        pool: In-memory pool object (e.g. for scripts/notebooks).
+        relpath: Path relative to the pool rootpath.
+        batchsize: Number of files processed per batch.
+        incremental: Skip files whose path is already in filemeta for this pool.
+        update_thumbs: Run thumbnail generation after ingest.
+        config: Application configuration.
     """
-    metalist = []
-    async with AsyncFileOperations(pool, appconf) as afop:
-        files = afop.dir_tree(relpath)
-        batches = batched(files, 500)
-        for batch in tqdm(batches):
-            tasklist = set()
-            for file in batch:
-                tasklist.add(asyncio.create_task(afop.file_to_db(file)))
-            async for task in asyncio.as_completed(tasklist):
-                dbmeta,_,_,_ = await task
-                metalist.append(dbmeta)
-    if pickle:
-        with open(appconf.datadir+"metalist.pkl", "wb") as f:
-            dump(metalist, f)
-    return metalist
+    if pool_id is not None:
+        dbop = DBOperations(pool_id=pool_id)
+        pool = dbop.pool
+    elif pool is not None:
+        dbop = DBOperations(pool=pool)
+    else:
+        raise ValueError("Either pool_id or pool must be provided")
 
+    async with AsyncFileOperations(pool, config) as afop:
+        files = list(afop.dir_tree(relpath))
+        if incremental:
+            with dbop.Session() as session:
+                existing = session.scalars(
+                    sa.select(DBMeta.path).where(DBMeta.pool_id == pool.id)
+                ).all()
+                existing_set = set(existing)
+            files = [path for path in files if path not in existing_set]
+
+        batches = list(batched(files, batchsize))
+        for batch in tqdm(
+            batches,
+            desc=f"Reading {len(files)} files in {len(batches)} batches",
+            total=len(batches),
+            unit="batch",
+        ):
+            tasks = [asyncio.create_task(afop.file_to_db(file)) for file in batch]
+            metalist = []
+            async for task in asyncio.as_completed(tasks):
+                dbmeta = await task
+                if dbmeta is not None:
+                    metalist.append(dbmeta)
+            if metalist:
+                with dbop.Session() as session:
+                    session.add_all(metalist)
+                    session.flush()
+                    session.commit()
+
+    if update_thumbs:
+        print("Updating thumbs")
+        dbop.update_thumbs_no_heic()
+        dbop.update_thumbs_no_thumb()

@@ -1,0 +1,34 @@
+# Alembic migrations
+
+Schema changes are applied with [Alembic](https://alembic.sqlalchemy.org/).
+
+## Setup
+
+Use the project venv and configuration (same as the app):
+
+```bash
+export MEIPI_CONFIG_ENV=/path/to/config.env   # optional, default: config.env
+uv sync
+```
+
+## Commands
+
+```bash
+# Apply all pending migrations
+alembic upgrade head
+
+# Roll back one revision
+alembic downgrade -1
+
+# Show current revision
+alembic current
+
+# Create a new revision (autogenerate; requires DB reachable)
+alembic revision --autogenerate -m "describe change"
+```
+
+`alembic/env.py` loads the database URL from `Config` and uses SQLAlchemy metadata from `meipi.indexing.model.Base`.
+
+## Initial content migration
+
+`versions/20260529_move_inhalt_to_filemeta.py` moves `inhalt` and `ts_content` from `documents` to `filemeta`, copies existing text, and adds a GIN index on `filemeta.ts_content`.

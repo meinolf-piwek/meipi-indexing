@@ -3,7 +3,7 @@
 from typing import List
 from itertools import batched
 import gc
-from tqdm.notebook import tqdm
+from tqdm.auto import tqdm
 import numpy as np
 from torch.utils.data import default_collate
 import torch

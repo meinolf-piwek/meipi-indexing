@@ -1,7 +1,7 @@
 """Definiert die IO-Operationen für die App."""
 import io
 import os
-from typing import List, Tuple, Generator, Sequence
+from typing import List, Optional, Tuple, Generator, Sequence, Any
 from datetime import datetime
 import json
 from pathlib import Path
@@ -13,30 +13,40 @@ from tika_client.data_models import TikaResponse
 from hashlib import file_digest
 from PIL import Image
 #import tika.parser as tp
+import numpy as np
 from libxmp import utils as xmpu
 import sqlalchemy as sa
 from sqlalchemy.orm import sessionmaker, Session
-from .model import Base as ModelBase, DBMeta, DBPic, DBDoc, DBDinoV2Vector, IdList,DBPool
+from .model import Base as ModelBase, DBMeta, DBPic, DBDoc, DBDinoV2Vector, DBVid, IdList,DBPool
 from .config import Config
 from . import appconf
 
+def _dali_resizer(*args, **kwargs):
+    from .picture import DALIImageResizer
+
+    return DALIImageResizer(*args, **kwargs)
 
 
 class DBOperations():
     """Enthält Methoden für die DB-Operationen der App, z.B. Einfügen von Bildern, Lesen von Pfaden, etc."""
-    def __init__(self, pool: DBPool, config: Config = appconf,
-        metadata: sa.MetaData = ModelBase.metadata,
-        enginekwargs: dict|None = None,
-        sessionkwargs: dict|None = None):
-        
+    def __init__(
+        self,
+        pool_id: int | None = None,
+        pool: DBPool | None = None,
+        *,
+        allow_no_pool: bool = False,
+        #config: Config = appconf,
+        enginekwargs: dict | None = None,
+        sessionkwargs: dict | None = None,
+    ):
+        self.config = appconf
         enginekwargs = {} if not enginekwargs else enginekwargs
         sessionkwargs = {} if not sessionkwargs else sessionkwargs
-        self.engine = sa.create_engine(config.db_conn_URL, logging_name="DBOperations",pool_logging_name=config.logger_name, **enginekwargs)
-        self.config = config
-        self.logger = config.logger
-        self.pool = pool
-        self.docroot = pool.rootpath
-        self.metadata = metadata
+        self.metadata = ModelBase.metadata
+        connect_args={"options": f"-c search_path={self.metadata.schema}"}
+        self.engine = sa.create_engine(self.config.db_conn_URL, connect_args = connect_args,
+        logging_name="DBOperations",pool_logging_name=self.config.logger_name, **enginekwargs)
+        self.logger = self.config.logger
         try:
             self.Session = sessionmaker(
                 bind=self.engine, expire_on_commit=False, **sessionkwargs
@@ -46,73 +56,102 @@ class DBOperations():
             raise
         else:
             self.logger.info("PostgreSQL engine created successfully.")
+        if pool_id is not None:
+            self.get_pool(pool_id)
+        elif pool is not None:
+            #self.create_pool(pool)
+            self.pool = pool
+        elif allow_no_pool:
+            self.logger.warning(
+                "No pool provided; filesystem operations require pool_id or pool"
+            )
+            self.pool = DBPool(
+                id=0, pool="default", rootpath="", description="Default pool"
+            )
+        else:
+            raise ValueError("Either pool_id or pool must be provided")
+        self.docroot = self.pool.rootpath
 
-    def create_tables(self):
-        """Erstellt die Tabellen in der Datenbank, falls sie noch nicht existieren."""
-        self.metadata.create_all(self.engine)
-        
-    def recreate_tables(self):
-        """Recreate tables in the database."""
-        self.metadata.drop_all(self.engine)
-        self.metadata.create_all(self.engine)
-        
-    def get_session(self, **kwargs)-> Session:
-        return self.Session(**kwargs)
-
-    def bulk_insert(self, TableClass: type[ModelBase], data: list[dict]):
-        """Insert a list of data into the database."""
-        with self.get_session(expire_on_commit=False) as session:
-            try:
-                stmt = sa.insert(TableClass).values(data)
-                session.execute(stmt)
-            except Exception as e:
-                self.logger.error("Error %s inserting", e)
-                session.rollback()
-                return False
-            else:
-                session.commit()
-                self.logger.warning(
-                    "Inserted data into %s table", TableClass.__tablename__
-                )
-                return True
-    
-    def meta_not_in_db(self,files:Sequence[Path]):
+    def schema_info(self) -> dict[str, Any]:
+        """Get the schema information of the database."""
+        tables = {}
         with self.Session() as session:
-            for file in files:
-                path = str(file).replace(self.docroot, "")
-                
-            
-            
+            cat = sa.Table('pg_tables', sa.MetaData(schema='pg_catalog'), autoload_with=self.engine)
+            for tname in session.scalars(sa.select(cat.c.tablename).where(cat.c.schemaname == self.metadata.schema)):
+                table = sa.Table(tname, self.metadata,autoload_with=self.engine)
+                stmt = sa.select(sa.func.count()).select_from(table)
+                tables[tname] = session.scalars(stmt).one()
+        return {"schema":self.metadata.schema, "tables": tables} 
+        
+    def get_pool(self, pool_id: int)-> DBPool:
+        """Get the pool with the given id."""
+        with self.Session() as session:
+            self.pool = session.get(DBPool, pool_id)
+            if self.pool is None:
+                raise ValueError(f"Pool with id {pool_id} not found")
+            return self.pool
+
+    def create_pool(self, pool: DBPool):
+        with self.Session() as session:
+            session.add(pool)  
+            session.commit()
+            session.refresh(pool)
+            self.pool = pool
+            self.docroot = pool.rootpath
+            self.logger.info("Pool created with id %s", pool.id)
+            return pool
     
-      
-    async def insert_docs_from_meta(self, pool: str, skipocr: bool = True):
-        """Liest die Metadaten aller Dokumente aus dem angegebenen Pool aus,
-        erstellt zugehörige DBDoc-Objekte und fügt sie der DB hinzu.
+    def create_tables(self, entities:Optional[Sequence[type[ModelBase]]]=None):
+        """Erstellt die Tabellen in der Datenbank, falls sie noch nicht existieren."""
+        if not entities:
+            tables = None
+        else:
+            tables = [entity.__tablename__ for entity in entities]
+        self.metadata.create_all(self.engine, tables=tables)
+        
+    def recreate_tables(self, entities:Optional[Sequence[type[ModelBase]]]=None):
+        """Recreate tables in the database."""
+        if not entities:
+            tables = None
+        else:
+            tables = [entity.__tablename__ for entity in entities]
+        self.metadata.drop_all(self.engine, tables=tables)
+        self.metadata.create_all(self.engine, tables=tables)
+        
+         
+    def clear_pool(self):
+        """Löscht alle Daten aus dem angegebenen Pool."""
+        with self.Session() as session:
+            session.query(DBMeta).filter(DBMeta.pool_id == self.pool.id).delete()
+            session.flush()
+            session.commit()
+            
+                
+    async def insert_docs_from_meta(self, skipocr: bool = True):
+        """Re-extract text for filemeta rows in the pool that have empty ``inhalt``.
+
+        For ``doc`` filemeta, ensures a :class:`DBDoc` row exists for embedding FKs.
 
         Args:
-        pool (str): Frei wählbarer Name für den Datenpool, z.B. "Bilder", "Texte", etc.
         skipocr (bool): Wenn True, wird die OCR-Verarbeitung übersprungen, um Ressourcen zu sparen.
         """
         with self.Session() as session:
             stmt = sa.select(DBMeta).where(
-                DBMeta.pool_id == self.pool.id and
-                DBMeta.ftype == "doc" and
-                DBMeta.id.not_in(
-                    sa.select(DBDoc.id)
-                )
+                DBMeta.pool_id == self.pool.id,
+                DBMeta.inhalt == "",
             )
             metalist = session.execute(stmt).scalars().all()
-        afop = AsyncFileOperations(pool=self.pool, config=self.config, skip_ocr=skipocr)
-        doclist = [
-            await afop.DBdoc_from_DBMeta(x)
-            for x in metalist
-            #if self.config.get_ftype(x.suffix) == "doc"
-        ] 
-        with self.Session() as session:
-            session.add_all(doclist)
+            afop = AsyncFileOperations(pool=self.pool, config=self.config, skip_ocr=skipocr)
+            for dbmeta in metalist:
+                _, content = await afop.tika_parse(dbmeta.path)
+                dbmeta.inhalt = content
+                if dbmeta.ftype == "doc" and dbmeta.doc is None:
+                    dbmeta.doc = DBDoc()
             session.flush()
-            session.commit()    
-                
+            session.commit()
+        
+        
+
     def insert_pics_from_meta(self):
         """Liest die Metadaten aller Bilder aus dem angegebenen Pool aus,
         erstellt zugehörige DBPic-Objekte und fügt sie der DB hinzu.
@@ -120,60 +159,74 @@ class DBOperations():
         
         """
         with self.Session() as session:
+            subq = sa.select(DBPic.id).where(DBPic.meta_id == DBMeta.id).exists()
             stmt = sa.select(DBMeta).where(
-                DBMeta.pool_id == self.pool.id and
-                DBMeta.ftype == "pic" and
-                DBMeta.id.not_in(
-                    sa.select(DBPic.id)
-                )
+                DBMeta.pool_id == self.pool.id,
+                DBMeta.ftype == "pic",
+                ~subq
             )
             metalist = session.execute(stmt).scalars().all()
-        afop = AsyncFileOperations(pool=self.pool, config=self.config, skip_ocr=True)
-        piclist = [
-            afop.DBPic_from_DBMeta(x)
-            for x in metalist
-            #if self.config.get_ftype(x.suffix) == "pic"
-        ] 
-        with self.Session() as session:
-            session.add_all(piclist)
+            afop = AsyncFileOperations(pool=self.pool, config=self.config, skip_ocr=True)
+            for dbmeta in metalist:
+                dbmeta.pic = afop.DBPic_from_DBMeta(dbmeta)
             session.flush()
             session.commit()
+                
 
-    def read_no_heic(self)->IdList:
-        """Liest die Pfade und ids aller Bilder aus der Datenbank, 
-        die noch keinen Thumbnail haben, aber keine HEICs sind."""
+    def update_thumbs_no_heic(self)->List[int]:
+        """Update the thumbnails and perceptual hashes for the pictures in the pool that are not HEICs."""
         with self.Session() as session:
             stmt = (
-                sa.select(DBPic.id, DBPic.meta.path)
-                .where(DBPic.thumbarray == None)
-                .where(DBPic.meta.suffix.not_in([".HEIC", ".heic"]))
+                sa.select(DBPic.id, DBMeta.path)
+                .join(DBPic.meta)
+                .where(DBMeta.pool_id == self.pool.id)
+                .where(DBPic.thumbarray.is_(None))
+                .where(DBMeta.suffix.not_in([".HEIC", ".heic"]))
             )
-        return [(self.docroot + x.path, x.id) for x in session.execute(stmt)]
+        
+            piclist = [
+                (os.path.join(self.docroot, row.path), row.id)
+                for row in session.execute(stmt)
+            ]
+        resizer = _dali_resizer(pipe_batch_size=10, num_threads=4)
+        grespics, greslabels, gerrfiles, gerrlabels = resizer.resize_pics(piclist, batch_size=100, use_PIL=False)
+        thumblist = list(zip(grespics, greslabels))
+        self.update_thumbs(thumblist)
+        return gerrlabels
+        
+        
 
-    def read_pic_no_thumb(self)-> IdList:
-        """Liest die Pfade und ids aller Bilder aus der Datenbank, 
-        die noch keinen Thumbnail haben"""
+    def update_thumbs_no_thumb(self)-> List[int]:
+        """Update the thumbnails and perceptual hashes for the pictures in the pool that have no thumbnail."""
         with self.Session() as session:
-            stmt = sa.select(DBPic.id, DBPic.meta.path).where(DBPic.thumbarray == None)
-        return [(self.docroot + x.path, x.id) for x in session.execute(stmt)]
+            stmt = (
+                sa.select(DBPic.id, DBMeta.path)
+                .join(DBPic.meta)
+                .where(DBMeta.pool_id == self.pool.id)
+                .where(DBPic.thumbarray.is_(None))
+            )
+            piclist = [
+                (os.path.join(self.docroot, row.path), row.id)
+                for row in session.execute(stmt)
+            ]
+        resizer = _dali_resizer(pipe_batch_size=1, num_threads=4,)
+        grespics, greslabels, gerrfiles, gerrlabels = resizer.resize_pics(piclist, batch_size=1, use_PIL=True)
+        thumblist = list(zip(grespics, greslabels))
+        self.update_thumbs(thumblist)
+        return gerrlabels
 
-    def update_thumbs(self, labels, thumbs):
-        updlist = []
-        for l, t in zip(labels, thumbs):
-            buf = io.BytesIO()
-            im = Image.fromarray(t)
-            im.save(fp=buf, format="png")
-            buf.seek(0)
-            updlist.append({"id": l, "thumbnail": buf.read()})
-        with self.Session() as session:
-            stmt = sa.update(DBPic)
-            session.execute(stmt, updlist)
-            session.commit()
 
-    def update_thumb_array(self, labels, thumbs):
-        updlist = [{"id": l, "thumbarray": t} for l, t in zip(labels, thumbs)]
+    def update_thumbs(self, thumblist: List[Tuple[np.ndarray, int]]):
+        """Update the thumbnails and perceptual hashes for the given list of pictures."""
         with self.Session() as session:
-            session.execute(sa.update(DBPic), updlist)
+            for thumb, id in thumblist:
+                pic = session.get(DBPic, id)
+                if pic is None:
+                    self.logger.warning("No DBPic row for id %s", id)
+                    continue
+                pic.thumbarray = thumb
+                pic.set_phash()
+            session.flush()
             session.commit()
 
 class AsyncFileOperations(AsyncTikaClient):
@@ -194,15 +247,19 @@ class AsyncFileOperations(AsyncTikaClient):
     def dir_tree(self, rel_path: str) -> Generator[str]:
         """Durchläuft rekursiv alle Dateien im Verzeichnisbaum, 
         extrahiert die Metadaten und Inhalte und erstellt DB-Objekte."""
-        for dirpath, _, filenames in os.walk(os.path.join(self.docroot,rel_path)):
+        abspath = os.path.join(self.docroot,rel_path)
+        assert os.path.exists(abspath), f"Directory {abspath} does not exist"
+        for dirpath, _, filenames in os.walk(abspath):
             for filename in filenames:
                 filepath = os.path.join(dirpath, filename)
-                yield filepath
+                yield os.path.relpath(filepath, self.docroot)
     
-    async def tika_parse(self, filepath: str) -> Tuple[DBMeta|None, str]:
+    async def tika_parse(self, rel_path: str) -> Tuple[DBMeta|None, str]:
         """Get metadata of a file using Tika. file, fdate und fsize kommen vom os."""
+        filepath = os.path.join(self.docroot, rel_path)
         try:
-            parsed: list[TikaResponse] = await self.rmeta.as_text.from_file(Path(filepath))
+            parsed: list[TikaResponse] = await self.rmeta.as_text.from_file(Path(
+                filepath))
             meta: dict = parsed[0].data
             meta = json.loads(json.dumps(parsed[0].data).replace("\\u0000", "null"))
             content = meta.pop(TikaKey.Content, "")  # type: ignore
@@ -212,32 +269,41 @@ class AsyncFileOperations(AsyncTikaClient):
             content = ""
         
         meta["file"] = filepath
-        meta["fdate"] = datetime.fromtimestamp(
-            os.path.getmtime(filepath)
-        ).isoformat()
-        meta["fsize"] = os.path.getsize(filepath)
-        assert filepath.startswith(self.docroot)
-        path = os.path.relpath(str(filepath),self.docroot)
-        os_fdate: str = meta.get("fdate", datetime.now().isoformat())
-        doc_cdate: str|None = meta.get("dcterms:created", None) # type: ignore
+        # meta["fdate"] = datetime.fromtimestamp(
+        #     os.path.getmtime(filepath)
+        # )
+        fsize = os.path.getsize(filepath)
+        
+        path = rel_path
+        fdate: datetime = datetime.fromtimestamp(os.path.getmtime(filepath))
+        doc_cdate_str: str|None|list[str] = meta.get("dcterms:created", None)
+        if isinstance(doc_cdate_str, list):
+            doc_cdate_str = doc_cdate_str[0]
+        if doc_cdate_str is None:
+            doc_cdate = fdate
+        else:  
+            try:
+                doc_cdate: datetime = datetime.fromisoformat(doc_cdate_str) # type: ignore
+            except Exception as e:
+                self.logger.error("Error %s parsing document creation date %s", e, doc_cdate_str)
+                doc_cdate = fdate
         content_length = meta.get("Content-Length", 0)
         if isinstance(content_length, list):
             content_length: int = content_length[0]
-        if isinstance(doc_cdate, list):
-            doc_cdate: str = doc_cdate[0]
+        
         suffix = os.path.splitext(path)[1]
         ftype = self.config.get_ftype(suffix)
         with open(filepath, "rb") as f:
             sha256 = file_digest(f, "sha256")
         try:
             dbmeta = DBMeta(
-                id = None, # type: ignore
+                #id = None, # type: ignore
                 pool_id= self.pool.id,
                 path=path,
                 fname=os.path.basename(path),
-                fdate=os_fdate,
-                sort_date=os_fdate if doc_cdate is None else doc_cdate,
-                fsize=meta.get("fsize", 0),
+                fdate=fdate,
+                sort_date= doc_cdate,
+                fsize=fsize,
                 clength=content_length,
                 ctype=meta.get("Content-Type", "unk/unk"),
                 md_keys=list(meta.keys()),
@@ -247,27 +313,12 @@ class AsyncFileOperations(AsyncTikaClient):
                 meta_data=meta,
             )
         except Exception as e:
-            self.logger.error("Error %s creating DBMeta fpath %s", e, filepath)
+            self.logger.error("Error %s creating DBMeta fpath %s", e, rel_path)
             return None, content 
         else:
             return dbmeta, content 
     
-    async def DBdoc_from_DBMeta(self,dbmeta: DBMeta) -> DBDoc|None:
-        """
-        Der Inhalt wird mit Tika extrahiert.
-        
-        """
-        assert dbmeta.ftype == "doc", "DBMeta object must have ftype 'doc'"
-        
-        _, inhalt = await self.tika_parse(self.docroot + dbmeta.path)
-            
-        dbdoc = DBDoc(
-            id= DBMeta.id, # type: ignore
-            meta = dbmeta, # type: ignore
-            inhalt=inhalt, # type: ignore
-        )
-        
-        return dbdoc
+    
     
     def DBPic_from_DBMeta(self, dbmeta: DBMeta) -> DBPic:
         """Get DBPic object from DBMeta object."""
@@ -281,31 +332,25 @@ class AsyncFileOperations(AsyncTikaClient):
                 for a, b, _ in data
             ]
         )
-        dbpic = DBPic(
-            id = dbmeta.id, # type: ignore
-            meta=dbmeta,
-            xmp=xmpdict,
-        )
+
+        dbpic = DBPic(xmp=xmpdict)
+        dbpic.meta_id = dbmeta.id
+        
+        
         return dbpic
            
         
-    async def file_to_db(self, filepath: str) ->  Tuple[DBMeta|None, DBDoc|None,
-                                        DBPic|None, None]:
-        """Get DBMeta and DBDoc objects from file path."""
-        dbmeta, content = await self.tika_parse(filepath)
+    async def file_to_db(self, rel_path: str) ->  DBMeta|None:
+        """Get DBMeta (and optional child rows) from file path."""
+        dbmeta, content = await self.tika_parse(rel_path)
         if dbmeta is None:
-            return None, None, None, None
-        dbdoc = None
-        dbpic = None
-        dbvid = None
+            return None
+
+        dbmeta.inhalt = content
         if dbmeta.ftype == "doc":
-            dbdoc = DBDoc(
-                id= dbmeta.id, # type: ignore
-                meta = dbmeta,
-                inhalt=content, # type: ignore
-                )
+            dbmeta.doc = DBDoc()
         if dbmeta.ftype == "pic":
-            dbpic = self.DBPic_from_DBMeta(dbmeta)
+            dbmeta.pic = self.DBPic_from_DBMeta(dbmeta)
         if dbmeta.ftype == "vid":
-            dbvid = None
-        return dbmeta, dbdoc, dbpic, dbvid
+            dbmeta.vid = DBVid()
+        return dbmeta

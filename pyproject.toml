@@ -8,9 +8,10 @@ version = "0.0.1"
 description = "Indexing Documents mit PostgreSQL"
 authors = [{ name = "Meinolf Piwek", email = "meinolf@piwek.email" }]
 license = { file = "LICENSE" }
-requires-python = ">=3.14"
+requires-python = ">=3.13"
 dependencies = [
     "accelerate>=1.10.1",
+    "click>=8.1.8",
     "cupy-cuda13x>=14.0.1",
     "dotenv>=0.9.9",
     "huggingface>=0.0.1",
@@ -36,10 +37,21 @@ dependencies = [
     "torchao>=0.16.0",
     "torchvision>=0.23.0",
     "tqdm>=4.67.1",
+    "alembic>=1.18.4",
 ]
 
+[project.scripts]
+meipi-index = "meipi.indexing.cmd.__main__:main"
+meipi-search = "meipi.indexing.ui.app:launch"
+
 [dependency-groups]
+ui = [
+    "streamlit>=1.40.0",
+    "meipi-indexing",
+]
 dev = [
+    "pytest>=8.4.0",
+    "pytest-asyncio>=1.0.0",
     "deptry>=0.23.1",
     "imageio>=2.37.0",
     "ipykernel>=6.30.1",
@@ -66,7 +78,17 @@ meipi-indexing = { workspace = true }
 nvidia-pyindex = ["pip"]
 nvidia-dali = ["pip"]
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-m 'not integration'"
+markers = [
+    "integration: tests that need a running PostgreSQL instance (MEIPI_TEST_DATABASE_URL)",
+]
 
+[tool.pyright]
+venvPath= "."
+venv=".venv"
 
 [build-system]
 requires = ["uv_build >= 0.8.17 ,<0.12.0"]

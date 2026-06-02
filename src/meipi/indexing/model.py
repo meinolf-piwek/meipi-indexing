@@ -2,8 +2,8 @@
 Es wird SQLAlchemy ORM verwendet, um die Datenbanktabellen zu definieren und zu verwalten.
 Die Modelle umfassen
 
-    * :class:`DBMeta`: Tabelle für Meta-Daten von Dateien
-    * :class:`DBDoc`: Tabelle für Textdokumente mit Volltextindex
+    * :class:`DBMeta`: Tabelle für Meta-Daten von Dateien (inkl. Volltext ``inhalt``)
+    * :class:`DBDoc`: Optionale Zeile pro Dokument-Datei (z. B. für Embedding-Chunks)
     * :class:`DBPic`: Tabelle für Bilder mit Thumbnail und Perceptual Hash
     * :class:`DBDinoV2Vector`: Tabelle für DINO V2 Bildvektoren
     
@@ -16,9 +16,12 @@ sowie zur Durchführung von Volltextsuchen und Berechnung von Perceptual Hashes.
 
 import io
 #import types
+#from tkinter import CASCADE
 from typing import Optional, Self, Sequence, List, Tuple
+from abc import ABC, abstractmethod
 from PIL import Image
 import numpy as np
+from datetime import datetime
 from imagehash import phash
 
 
@@ -30,14 +33,19 @@ from sqlalchemy.orm import (
     mapped_column,
     MappedAsDataclass,
     declared_attr,
-    Session
+    Session,
+    CascadeOptions
 )
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, BYTEA, BIGINT
 from sqlalchemy.schema import Computed
 from pgvector.sqlalchemy import Vector
 from . import appconf
 
-#type IdList = List[Tuple[str, int]]  # List of tuples (file path, id)
+_search_language = "german"
+
+
+# (filesystem path, pictures.id) — use with update_thumb_array; not filemeta.id
+type IdList = Sequence[Tuple[str, int]]
 
 class PILArray(types.TypeDecorator):
     """
@@ -65,10 +73,10 @@ class PILArray(types.TypeDecorator):
     def process_result_value(self, value, dialect):
         if value is not None:
             bf = io.BytesIO(value)
-            return np.load(bf)
+            return np.load(bf, allow_pickle=False)
         else:
             return None
-        # return np.array(value,dtype=np.uint8).reshape(224,224,3)
+        
 
     def process_literal_param(self, value, dialect): #type: ignore
         return None 
@@ -108,6 +116,29 @@ class Base(MappedAsDataclass, DeclarativeBase):
         data.pop("_sa_instance_state", "")  # Remove SQLAlchemy state
         return data
 
+
+class CatalogBase(DeclarativeBase):
+    """Declarative base for PostgreSQL catalog views (read-only, no dataclass ORM)."""
+
+    metadata = MetaData()
+
+
+class DBCatalog(CatalogBase):
+    """Read-only ORM mapping of ``pg_catalog.pg_tables``."""
+
+    __tablename__ = "pg_tables"
+    __table_args__ = {"schema": "pg_catalog"}
+
+    schemaname: Mapped[str] = mapped_column(primary_key=True)
+    tablename: Mapped[str] = mapped_column(primary_key=True)
+    tableowner: Mapped[str] = mapped_column()
+    tablespace: Mapped[Optional[str]] = mapped_column()
+    hasindexes: Mapped[bool] = mapped_column()
+    hasrules: Mapped[bool] = mapped_column()
+    hastriggers: Mapped[bool] = mapped_column()
+    rowsecurity: Mapped[bool] = mapped_column()
+
+
 class DBPool(Base):
     """SQLAlchemy model for data pools stored in PostgreSQL.
     
@@ -118,9 +149,7 @@ class DBPool(Base):
     __tablename__ = "datapools"
     __table_args__ = (Index("ix_datapools_pool", "pool", unique=True),)
 
-    id: Mapped[int] = mapped_column(
-        primary_key=True, autoincrement=True, sort_order=0
-    )
+    
     pool: Mapped[str] = mapped_column(
         nullable=False, unique=True, doc="Name of the data pool"
     )
@@ -130,17 +159,22 @@ class DBPool(Base):
     description: Mapped[Optional[str]] = mapped_column(
         nullable=True, doc="Optional description of the data pool"
     )
-
+    id: Mapped[int] = mapped_column(
+        primary_key=True, autoincrement=True, sort_order=0, default=None
+    )
 
 class DBMeta(Base):
     """SQLAlchemy model for Meta data stored in PostgreSQL."""
 
     __tablename__ = "filemeta"
-    __table_args__ = (Index("ix_filemeta_sha256", "sha256"),
-                    Index("ix_filemeta_path", "pool_id","path", unique=True),)
+    __table_args__ = (
+        Index("ix_filemeta_sha256", "sha256"),
+        Index("ix_filemeta_path", "pool_id", "path", unique=True),
+        Index("ix_filemeta_ts_content", "ts_content", postgresql_using="gin"),
+    )
 
     id: Mapped[int] = mapped_column(
-        primary_key=True, autoincrement=True, sort_order=0,
+        primary_key=True, autoincrement=True, sort_order=0, init=False
             )
     pool_id: Mapped[int] = mapped_column(ForeignKey("datapools.id"),
         nullable=False, doc="Anwendungsgebiet, Datenpool, frei definierbar"
@@ -152,10 +186,10 @@ class DBMeta(Base):
     )
     fname: Mapped[str] = mapped_column(nullable=False, doc="Dateiname")
     suffix: Mapped[str] = mapped_column(nullable=False, doc="Dateisuffix, incl. dot")
-    sort_date: Mapped[DateTime] = mapped_column(
+    sort_date: Mapped[datetime] = mapped_column(
         DateTime(), nullable=False, doc="Datum für Sortierung"
     )
-    fdate: Mapped[DateTime] = mapped_column(
+    fdate: Mapped[datetime] = mapped_column(
         DateTime(), nullable=False, doc="Dateidatum des Systems"
     )
     fsize: Mapped[int] = mapped_column(BIGINT, nullable=False, doc="Dateigröße des Systems")
@@ -175,53 +209,57 @@ class DBMeta(Base):
     sha256: Mapped[Optional[bytes]] = mapped_column(
         BYTEA, nullable=True, default=None, doc="FileHash"
     )
-    doc: Mapped[Optional["DBDoc"]] = relationship(back_populates="meta",
-                                    cascade = "delete", passive_deletes=True, default= None)
-    pic: Mapped[Optional["DBPic"]] = relationship(back_populates="meta",
-                                    cascade = "delete", passive_deletes=True, default= None)
-    vid: Mapped[Optional["DBVid"]] = relationship(back_populates="meta",
-                                    cascade = "delete", passive_deletes=True, default= None)
-
-class DBDoc(Base):
-    """SQLAlchemy model for text documents stored in PostgreSQL.
-    
-    Es enthält ein spezielles Feld ts_content, das als TSVECTOR definiert ist und eine
-    Volltextsuche in PostgreSQL ermöglicht. 
-    Die Methode tsquery ermöglicht es, eine PostgreSQL-Volltextsuche auf diesem Feld durchzuführen.
-    """
-
-    __tablename__ = "documents"
-    _search_language = "german"
-
-    id: Mapped[int] = mapped_column(ForeignKey("filemeta.id",ondelete="CASCADE"),
-        primary_key=True, sort_order=0,
-        )
-    
-    meta: Mapped["DBMeta"] = relationship(back_populates="doc")
-    
     inhalt: Mapped[str] = mapped_column(
         TEXT,
         default="",
         nullable=False,
         kw_only=True,
         deferred=True,
-        doc="Inhalt des Textdokuments",
+        doc="Extracted text content (all file types)",
     )
-    
     ts_content: Mapped[TSVECTOR] = mapped_column(
         TSVECTOR,
         Computed("to_tsvector('%s', inhalt)" % _search_language),
-        default=None,
+        init=False,
         nullable=True,
         deferred=True,
-        doc="Spezieller Indexvektor für Volltextsuche in postgresql",
+        doc="Full-text search vector derived from inhalt",
     )
+    doc: Mapped[Optional["DBDoc"]] = relationship(back_populates="meta",
+                                    cascade = "all, delete-orphan", passive_deletes=True, default= None)
+    pic: Mapped[Optional["DBPic"]] = relationship(back_populates="meta",
+                                    cascade = "all, delete-orphan", passive_deletes=True, default= None)
+    vid: Mapped[Optional["DBVid"]] = relationship(back_populates="meta",
+                                    cascade = "all, delete-orphan", passive_deletes=True, default= None)
 
     @classmethod
-    def tsquery(cls: type[Self], query: str, session: Session, lang="german") -> Sequence[Self]:
-        """Perform a full-text search on the ts_content field."""
+    def tsquery(
+        cls: type[Self], query: str, session: Session, lang: str = "german"
+    ) -> Sequence[Self]:
+        """Perform a full-text search on ``ts_content``."""
         stmt = select(cls).where(cls.ts_content.match(query, reg_conf=lang))
         return session.execute(stmt).scalars().all()
+
+
+class DBDoc(Base):
+    """Optional document row for ``doc`` filemeta (e.g. embedding chunks).
+
+    Full-text content lives on :class:`DBMeta` (``inhalt`` / ``ts_content``).
+    """
+
+    __tablename__ = "documents"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True, sort_order=0, init=False)
+
+    meta_id: Mapped[int] = mapped_column(
+        ForeignKey("filemeta.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        init=False,
+    )
+    meta: Mapped["DBMeta"] = relationship(
+        back_populates="doc", init=False, single_parent=True
+    )
 
 
 class DBPic(Base):
@@ -240,9 +278,11 @@ class DBPic(Base):
     _phash_size = 8
     _phash_high_freq = 2
 
-    id: Mapped[int] = mapped_column(ForeignKey("filemeta.id", ondelete="CASCADE"),
-        primary_key=True, autoincrement=True, sort_order=0, default=None
-    )
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True, sort_order=0, init=False)
+    # Fremdschlüssel auf die Tabelle der Dateimetadaten
+    meta_id: Mapped[int] = mapped_column(ForeignKey("filemeta.id",ondelete="CASCADE"), nullable=False, unique=True, init=False)
+    meta: Mapped["DBMeta"] = relationship(back_populates="pic", init=False, single_parent=True)
+
     xmp: Mapped[Optional[dict]] = mapped_column(
         JSONB, default=None, doc="XMP-attributes of the image"
     )
@@ -255,9 +295,7 @@ class DBPic(Base):
     phash: Mapped[Optional[bytes]] = mapped_column(
         BYTEA, default=None, doc="Perceptual hash as bytes"
     )
-    meta: Mapped[Optional["DBMeta"]] = relationship(back_populates="pic",
-                                    default= None)
-
+    
     def set_phash(self):
         if self.thumbarray is not None:
             thumb_image = Image.fromarray(self.thumbarray)
@@ -279,18 +317,21 @@ class DBPic(Base):
 class DBVid(Base):
     """SQLAlchemy model for Video data stored in PostgreSQL."""
     __tablename__ = "videos"
-    id: Mapped[int] = mapped_column(ForeignKey("filemeta.id",ondelete="CASCADE"),
-        primary_key=True, autoincrement=True, sort_order=0, default=None
-    )
-    meta: Mapped[Optional["DBMeta"]] = relationship(back_populates="vid",
-                                    default= None)
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True, sort_order=0,init=False)
+    # Fremdschlüssel auf die Tabelle der Dateimetadaten
+    meta_id: Mapped[int] = mapped_column(ForeignKey("filemeta.id",ondelete="CASCADE"),
+        nullable=False, unique=True, init=False) 
+    meta: Mapped["DBMeta"] = relationship(back_populates="vid",init=False, single_parent=True)
     
 class DocVectorMixin(MappedAsDataclass):
     """Mixin für DocVectorTables"""
-
-    _vector_size = 0
+    @classmethod
+    @abstractmethod
+    def _vector_size(cls) -> int:
+        raise NotImplementedError("Subclasses must implement this method")
     chunk_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    doc_id: Mapped[int] = mapped_column(ForeignKey("documents.id"))
+    doc_id: Mapped[int] = mapped_column(ForeignKey("documents.id",ondelete="CASCADE"))
     content: Mapped[str] = mapped_column(TEXT, nullable=True)
 
     @declared_attr
@@ -299,7 +340,7 @@ class DocVectorMixin(MappedAsDataclass):
     ) -> Mapped[
         list[float]
     ]:  
-        return mapped_column(Vector(cls._vector_size), nullable=False)
+        return mapped_column(Vector(cls._vector_size()), nullable=False)
 
     @declared_attr
     def doc(
@@ -316,8 +357,12 @@ class PicVectorMixin(MappedAsDataclass):
     Es wird ein Fremdschlüssel pic_id definiert, der auf die Tabelle der Bilddaten verweist.
     """
 
-    _vector_size = 0
-    pic_id: Mapped[int] = mapped_column(ForeignKey("pictures.id"), primary_key=True)
+    @classmethod
+    @abstractmethod
+    def _vector_size(cls) -> int:
+        raise NotImplementedError("Subclasses must implement this method")
+
+    pic_id: Mapped[int] = mapped_column(ForeignKey("pictures.id",ondelete="CASCADE"), primary_key=True)
 
     @declared_attr
     def vector(
@@ -325,11 +370,13 @@ class PicVectorMixin(MappedAsDataclass):
     ) -> Mapped[
         list[float]
     ]:
-        return mapped_column(Vector(cls._vector_size), nullable=False)
+        return mapped_column(Vector(cls._vector_size()), nullable=False)
 
 
 class DBDinoV2Vector(Base, PicVectorMixin):
     """SQLAlchemy model for DINO V2 image embeddings stored in PostgreSQL."""
 
     __tablename__ = "dino_v2_vectors"
-    _vector_size = 1024  # Größe des Vektors für DINO-Modelle
+    @classmethod
+    def _vector_size(cls) -> int:
+        return 1024  # Größe des Vektors für DINO-Modelle
