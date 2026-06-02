@@ -4,7 +4,7 @@ include = ["meipi"]
 namespaces = true
 [project]
 name = "meipi-indexing"
-version = "0.0.1"
+version = "0.1.0"
 description = "Indexing Documents mit PostgreSQL"
 authors = [{ name = "Meinolf Piwek", email = "meinolf@piwek.email" }]
 license = { file = "LICENSE" }
