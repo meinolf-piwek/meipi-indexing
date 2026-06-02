@@ -8,7 +8,6 @@ Diese Dokumentation beschreibt Architektur, Konfiguration und API von
    :maxdepth: 2
    :caption: Inhalte
    
-   full
-   autodoc/modules
-   autodoc/indexing.db
+   overview
+   api
 

@@ -1,5 +1,5 @@
-Projektueberblick
-=================
+Overview
+========
 
 ``meipi-indexing`` indexiert Dateien in PostgreSQL und kombiniert:
 
@@ -8,6 +8,5 @@ Projektueberblick
 - relationale Modellierung mit SQLAlchemy
 - Volltextsuche ueber ``filemeta.ts_content``
 
-Die technische API wird im Abschnitt ``autodoc`` automatisch aus den
+Die technische API wird im Abschnitt ``API`` automatisch aus den
 Docstrings erzeugt.
-
