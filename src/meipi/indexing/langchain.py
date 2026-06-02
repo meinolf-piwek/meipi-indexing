@@ -1,4 +1,9 @@
-"""Deprecated: Langchain-Integration."""
+"""Deprecated LangChain integration stubs.
+
+The active indexing pipeline no longer depends on this module. It remains in
+the repository as historical reference until the replacement workflow is fully
+stabilized.
+"""
 
 
 # import os

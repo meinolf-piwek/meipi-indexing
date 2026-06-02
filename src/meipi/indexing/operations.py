@@ -1,4 +1,9 @@
-"""Definiert die IO-Operationen für die App."""
+"""Database and filesystem operations for indexing workflows.
+
+``DBOperations`` wraps SQLAlchemy session/engine handling and higher-level
+update routines. ``AsyncFileOperations`` handles file discovery plus Tika/XMP
+extraction for ``DBMeta`` and child ORM rows.
+"""
 import io
 import os
 from typing import List, Optional, Tuple, Generator, Sequence, Any
@@ -28,7 +33,7 @@ def _dali_resizer(*args, **kwargs):
 
 
 class DBOperations():
-    """Enthält Methoden für die DB-Operationen der App, z.B. Einfügen von Bildern, Lesen von Pfaden, etc."""
+    """High-level PostgreSQL operations for one configured data pool."""
     def __init__(
         self,
         pool_id: int | None = None,
@@ -92,6 +97,7 @@ class DBOperations():
             return self.pool
 
     def create_pool(self, pool: DBPool):
+        """Insert a new data pool and make it active for this instance."""
         with self.Session() as session:
             session.add(pool)  
             session.commit()
@@ -230,7 +236,7 @@ class DBOperations():
             session.commit()
 
 class AsyncFileOperations(AsyncTikaClient):
-    """Enthält Methoden für die Datei-Operationen der App, z.B. Einlesen von Bildern, Berechnen von Hashes, etc."""
+    """Async file parsing helpers built on top of ``tika_client``."""
     def __init__(self, pool:DBPool, config: Config = appconf, 
             skip_ocr: bool = True, timeout: float = 30, compress=True):
         self.config = config
@@ -255,7 +261,7 @@ class AsyncFileOperations(AsyncTikaClient):
                 yield os.path.relpath(filepath, self.docroot)
     
     async def tika_parse(self, rel_path: str) -> Tuple[DBMeta|None, str]:
-        """Get metadata of a file using Tika. file, fdate und fsize kommen vom os."""
+        """Parse one file with Tika and convert metadata into ``DBMeta`` fields."""
         filepath = os.path.join(self.docroot, rel_path)
         try:
             parsed: list[TikaResponse] = await self.rmeta.as_text.from_file(Path(
@@ -321,7 +327,7 @@ class AsyncFileOperations(AsyncTikaClient):
     
     
     def DBPic_from_DBMeta(self, dbmeta: DBMeta) -> DBPic:
-        """Get DBPic object from DBMeta object."""
+        """Build a ``DBPic`` row from image metadata and XMP tags."""
         assert dbmeta.ftype == "pic", "DBMeta object must have ftype 'pic'"
         
         xmp = xmpu.file_to_dict(os.path.join(self.docroot,dbmeta.path))
@@ -341,7 +347,7 @@ class AsyncFileOperations(AsyncTikaClient):
            
         
     async def file_to_db(self, rel_path: str) ->  DBMeta|None:
-        """Get DBMeta (and optional child rows) from file path."""
+        """Create ``DBMeta`` and optional typed child rows for a file path."""
         dbmeta, content = await self.tika_parse(rel_path)
         if dbmeta is None:
             return None

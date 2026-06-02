@@ -15,10 +15,16 @@ release = '0.0.1'
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
-sys.path.append(str(Path('../..', 'src/meipi').resolve()))
+sys.path.append(str(Path("../..", "src").resolve()))
 
 extensions = ['sphinx.ext.autosummary', 'sphinx.ext.napoleon', 'sphinx.ext.viewcode', 'sphinx.ext.autodoc']
 autodoc_mock_imports = ['nvidia.dali']
+autosummary_generate = True
+autodoc_default_options = {
+    "members": True,
+    "undoc-members": True,
+    "show-inheritance": True,
+}
 
 templates_path = ['_templates']
 exclude_patterns = []

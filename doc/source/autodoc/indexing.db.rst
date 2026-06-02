@@ -1,37 +1,6 @@
-indexing.db package
-===================
+indexing.db package (legacy)
+============================
 
-Submodules
-----------
-
-indexing.db.model module
-------------------------
-
-.. automodule:: indexing.db.model
-   :members:
-   :show-inheritance:
-   :undoc-members:
-
-indexing.db.pillow module
--------------------------
-
-.. automodule:: indexing.db.pillow
-   :members:
-   :show-inheritance:
-   :undoc-members:
-
-indexing.db.postgres module
----------------------------
-
-.. automodule:: indexing.db.postgres
-   :members:
-   :show-inheritance:
-   :undoc-members:
-
-Module contents
----------------
-
-.. automodule:: indexing.db
-   :members:
-   :show-inheritance:
-   :undoc-members:
+Dieses Projekt verwendet aktuell das Paket ``meipi.indexing``.
+Historische Referenzen auf ``indexing.db`` sind veraltet und wurden in der
+Sphinx-Dokumentation durch ``meipi.indexing`` ersetzt.

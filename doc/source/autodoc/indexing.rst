@@ -1,53 +1,25 @@
-indexing package
-================
+meipi.indexing package
+======================
 
-Subpackages
------------
+Diese Seite beschreibt die wichtigsten Module des Pakets
+``meipi.indexing`` ohne Laufzeit-Importe waehrend des Sphinx-Builds.
+Damit bleibt die Dokumentation auch in Umgebungen ohne volle Runtime-
+Abhaengigkeiten stabil.
 
-.. toctree::
-   :maxdepth: 2
-
-   indexing.db
-
-Submodules
+Kernmodule
 ----------
 
-indexing.config module
-----------------------
+- ``meipi.indexing.config``: App-Konfiguration (ENV/Keyring/DB-URL)
+- ``meipi.indexing.model``: SQLAlchemy-Modelle fuer Pools, File-Metadaten und Typ-Tabellen
+- ``meipi.indexing.operations``: DB-Workflows und asynchrone Datei-Verarbeitung
+- ``meipi.indexing.search``: PostgreSQL-Volltextsuche
+- ``meipi.indexing.picture``: Thumbnail-Generierung und Bild-Resize-Pipeline
+- ``meipi.indexing.embedding``: Batching und Erzeugung von Bild-Embeddings
+- ``meipi.indexing.srcdocs``: experimentelle Speicherung binaerer Bilddaten
+- ``meipi.indexing.langchain``: veraltete Integrationsreste
 
-.. automodule:: indexing.config
-   :members:
-   :show-inheritance:
-   :undoc-members:
-
-indexing.embedding module
--------------------------
-
-.. automodule:: indexing.embedding
-   :members:
-   :show-inheritance:
-   :undoc-members:
-
-indexing.preprocess module
---------------------------
-
-.. automodule:: indexing.preprocess
-   :members:
-   :show-inheritance:
-   :undoc-members:
-
-indexing.utils module
+Hinweis zum API-Build
 ---------------------
 
-.. automodule:: indexing.utils
-   :members:
-   :show-inheritance:
-   :undoc-members:
-
-Module contents
----------------
-
-.. automodule:: indexing
-   :members:
-   :show-inheritance:
-   :undoc-members:
+Fuer echte autodoc-Ausgaben mit importierten Symbolen sollte der Build in der
+Projektumgebung mit allen Abhaengigkeiten laufen, z.B. mit ``uv run``.

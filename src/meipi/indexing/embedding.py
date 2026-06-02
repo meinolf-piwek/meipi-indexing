@@ -1,4 +1,11 @@
-"""Bereitstellung von Funktionen zur Erzeugung von Bild-Embeddings"""
+"""Helpers for batching images and generating image embeddings.
+
+This module provides small, model-agnostic utilities used by indexing jobs:
+
+- pre-processing image inputs into model-compatible batches
+- running batched forward passes on a selected device
+- collecting pooled vectors as ``numpy.ndarray``
+"""
 
 from typing import List
 from itertools import batched
@@ -12,7 +19,7 @@ from transformers.image_utils import ImageInput
 
 
 def check_cuda_memory() -> None:
-    """Listet die Größe aller Tensoren auf cuda-device"""
+    """Print all currently alive CUDA tensors for debugging memory usage."""
     for obj in filter(lambda o: isinstance(o, torch.Tensor), gc.get_objects()):
         if obj.device.type == "cuda":
             print(type(obj), obj.size(), obj.device)
@@ -21,11 +28,15 @@ def check_cuda_memory() -> None:
 def create_image_batches(
     images: ImageInput, model_name: str, batch_size: int
 ) -> List[BatchFeature]:
-    """Erzeuge batches der Bilder, die als Input für die Embedding-Erzeugung dienen können.
-    Es wird AutoImageProcessor von HuggingFace verwendet,
-    um einen zum Modell passenden Prozessor zu erstellen.
-    Die Funktion gibt eine Liste von BatchFeature-Objekten zurück,
-    die die Bilder in den Batches enthalten.
+    """Create model-ready image batches using the matching HuggingFace processor.
+
+    Args:
+        images: Raw image inputs accepted by ``transformers``.
+        model_name: HuggingFace model id used to resolve ``AutoImageProcessor``.
+        batch_size: Number of samples per returned batch.
+
+    Returns:
+        A list of ``BatchFeature`` objects containing ``pixel_values`` tensors.
     """
 
     image_processor: BaseImageProcessor = AutoImageProcessor.from_pretrained(
@@ -42,11 +53,11 @@ def create_image_batches(
 def generate_image_embeddings(
     model, inp_batches: List[BatchFeature], device="cuda"
 ) -> np.ndarray:
-    """Erzeuge Embeddings für Bilder, die in den Batches übergeben werden.
-    Es wird das übergebene Modell verwendet, das auf das übergebene Device verschoben wird.
-    Nach der Erzeugung der Embeddings wird das Modell wieder auf das ursprüngliche Device
-    zurückverschoben.
-    Die Funktion gibt ein numpy-Array zurück, das die Embeddings enthält."""
+    """Generate pooled embeddings for all batches and return one stacked array.
+
+    The model is temporarily moved to ``device`` for inference and restored to its
+    original device afterwards.
+    """
 
     olddev = model.device
     model.to(device)

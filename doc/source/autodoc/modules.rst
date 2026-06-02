@@ -1,5 +1,5 @@
-indexing
-========
+meipi.indexing
+==============
 
 .. toctree::
    :maxdepth: 2

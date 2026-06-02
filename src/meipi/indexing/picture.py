@@ -1,10 +1,8 @@
-""" Modul zum Laden und Vorverarbeiten von Bildern mit DALI.
-    Es können Bilder mit DALI oder PIL geladen werden.
-    Die Bilder werden auf eine Größe von 224x224 skaliert und gepaddet.
-    Die Funktion process() verarbeitet die Bilder in Batches und gibt die Ergebnisse zurück.
-    Eingabe: Liste von Dateipfaden und Labels, Batchgröße in der Pipeline, Zahl der Threads.
-    Ausgabe: Tupel aus vier Listen: (Bilder, Labels, Fehlerdateipfade, Fehlerlabels)
-    
+"""Image loading and resizing helpers based on DALI and PIL fallback.
+
+The module provides a high-throughput resize pipeline for generating thumbnails
+from file paths plus picture ids. Failed DALI batches can be retried with
+smaller batches and optionally with PIL-backed loading.
 """
 __all__ = ["PILLoader", "DALIImageResizer"]
 
@@ -146,8 +144,12 @@ class DALIImageResizer:
         # pkl_file: str=None,
         show_progress: bool = False,
     ) -> tuple[List[np.ndarray], List[int], List[str], List[int]]:
-        """Verabeitet die Pipeline in Batches und gibt die Ergebnisse zurück.
-        Rückgabe: (Bilder, Labels, Fehlerdateipfade, Fehlerlabels)"""
+        """Run one resize pass and return successes and failures.
+
+        Returns:
+            A tuple ``(images, labels, error_files, error_labels)`` where labels
+            are ``pictures.id`` values.
+        """
         if len(files) != len(labels):
             raise ValueError("Files and labels must have the same length")
         pipe_batch_size = min(batch_size, self.pipe_batch_size)
@@ -184,7 +186,7 @@ class DALIImageResizer:
     def resize_pics(
         self, piclist: IdList, batch_size: int, use_PIL: bool
     ) -> Tuple[List[np.ndarray], List[int], List[str], List[int]]:
-        """Erstellt Thumbnails für die Bilder in piclist.
+        """Create thumbnails for all pictures in ``piclist``.
 
         Der DALI-Image-Resizer ist wesentlich performanter als der PIL-Image-Resizer.
         Außerdem sind größere Batches deutlich performanter als kleinere Batches.
@@ -203,8 +205,7 @@ class DALIImageResizer:
             use_PIL (bool): Ob die Thumbnails mit PIL erstellt werden sollen (True) oder mit DALI (False)
 
         Returns:
-            Tuple[List[bytes], List[int], List[str], List[int]]: Thumbnails,
-            zugehörige ``pictures.id``, Pfade und ``pictures.id`` der Fehlschläge
+            ``(thumbnails, pic_ids, failed_paths, failed_pic_ids)``.
         """
         # Durchgang 1: DALI und große Batchgröße
         batches = batched(piclist, batch_size)
