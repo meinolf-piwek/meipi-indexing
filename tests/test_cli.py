@@ -22,6 +22,15 @@ def test_read_files_subcommand_help():
     assert "RELPATH" in result.output
 
 
+def test_watch_subcommand_help():
+    runner = CliRunner()
+    result = runner.invoke(cli, ["watch", "--help"])
+    assert result.exit_code == 0
+    assert "--pool-id" in result.output
+    assert "--initial-scan" in result.output
+    assert "RELPATH" in result.output
+
+
 def test_schema_info_invokes_db_operations(monkeypatch):
     captured: dict[str, Any] = {}
 
