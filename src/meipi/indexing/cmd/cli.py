@@ -12,7 +12,8 @@ import click
 from .. import appconf
 from ..model import DBPool
 from ..operations import DBOperations
-from .main import read_files_bulk
+from ..watcher import PoolWatcher
+from .main import index_file, read_files_bulk
 
 
 def _db_ops(pool_id: int) -> DBOperations:
@@ -242,6 +243,68 @@ def insert_docs(ctx: click.Context, pool_id: int, ocr: bool) -> None:
 
     asyncio.run(_run())
     click.echo(f"Inserted document rows for pool {pool_id}.")
+
+
+@cli.command("watch")
+@click.option(
+    "--pool-id",
+    type=int,
+    required=True,
+    help="Datapool id from the datapools table",
+)
+@click.argument("relpath", default=".")
+@click.option(
+    "--debounce",
+    type=float,
+    default=1.0,
+    show_default=True,
+    help="Seconds to wait before indexing after the last change",
+)
+@click.option(
+    "--no-thumbs",
+    is_flag=True,
+    help="Skip thumbnail generation when indexing changed files",
+)
+@click.option(
+    "--initial-scan",
+    is_flag=True,
+    help="Run incremental read-files once before watching",
+)
+@click.pass_context
+def watch(
+    ctx: click.Context,
+    pool_id: int,
+    relpath: str,
+    debounce: float,
+    no_thumbs: bool,
+    initial_scan: bool,
+) -> None:
+    """Watch a pool directory and keep the index in sync with filesystem changes."""
+    dbop = _db_ops(pool_id)
+    if initial_scan:
+        click.echo(f"Initial scan of {relpath!r} for pool {pool_id}...")
+        asyncio.run(
+            read_files_bulk(
+                pool_id=pool_id,
+                relpath=relpath,
+                incremental=True,
+                update_thumbs=not no_thumbs,
+                config=appconf,
+            )
+        )
+
+    watcher = PoolWatcher(
+        dbop,
+        watch_relpath=relpath,
+        debounce_seconds=debounce,
+        update_thumbs=not no_thumbs,
+        config=appconf,
+    )
+    click.echo(
+        f"Watching {watcher.watch_abspath!r} for pool {pool_id} "
+        f"(Ctrl+C to stop)..."
+    )
+    watcher.run(block=True)
 
 
 def main(args: list[str] | None = None) -> int:

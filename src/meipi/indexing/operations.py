@@ -133,6 +133,19 @@ class DBOperations():
             session.query(DBMeta).filter(DBMeta.pool_id == self.pool.id).delete()
             session.flush()
             session.commit()
+
+    def delete_file_meta(self, rel_path: str) -> bool:
+        """Remove the filemeta row for ``rel_path`` in the current pool."""
+        with self.Session() as session:
+            deleted = (
+                session.query(DBMeta)
+                .filter(DBMeta.pool_id == self.pool.id, DBMeta.path == rel_path)
+                .delete()
+            )
+            session.commit()
+            if deleted:
+                self.logger.info("Removed index entry for %s", rel_path)
+            return deleted > 0
             
                 
     async def insert_docs_from_meta(self, skipocr: bool = True):
@@ -236,6 +249,39 @@ class DBOperations():
                 pic.set_phash()
             session.flush()
             session.commit()
+
+    def update_thumb_for_path(self, rel_path: str) -> bool:
+        """Generate a missing thumbnail for one indexed picture path."""
+        with self.Session() as session:
+            stmt = (
+                sa.select(DBPic.id)
+                .join(DBPic.meta)
+                .where(
+                    DBMeta.pool_id == self.pool.id,
+                    DBMeta.path == rel_path,
+                    DBPic.thumbarray.is_(None),
+                )
+            )
+            pic_id = session.scalars(stmt).first()
+        if pic_id is None:
+            return False
+
+        full_path = os.path.join(self.docroot, rel_path)
+        suffix = os.path.splitext(rel_path)[1]
+        use_pil = suffix.lower() == ".heic"
+        resizer = _dali_resizer(pipe_batch_size=1, num_threads=1)
+        grespics, greslabels, _, gerrlabels = resizer.resize_pics(
+            [(full_path, pic_id)],
+            batch_size=1,
+            use_PIL=use_pil,
+        )
+        if gerrlabels:
+            self.logger.warning(
+                "Thumbnail generation failed for %s (pic id %s)", rel_path, pic_id
+            )
+            return False
+        self.update_thumbs(list(zip(grespics, greslabels)))
+        return True
 
 class AsyncFileOperations(AsyncTikaClient):
     """Async file parsing helpers built on top of ``tika_client``."""

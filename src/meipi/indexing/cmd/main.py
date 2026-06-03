@@ -14,6 +14,43 @@ from ..model import DBMeta, DBPool
 from ..operations import AsyncFileOperations, DBOperations
 
 
+async def index_file(
+    *,
+    pool_id: int | None = None,
+    pool: DBPool | None = None,
+    rel_path: str,
+    update_thumbs: bool = True,
+    config: Config = appconf,
+) -> bool:
+    """Index or re-index a single file in the database."""
+    if pool_id is not None:
+        dbop = DBOperations(pool_id=pool_id)
+        pool = dbop.pool
+    elif pool is not None:
+        dbop = DBOperations(pool=pool)
+    else:
+        raise ValueError("Either pool_id or pool must be provided")
+
+    async with AsyncFileOperations(pool, config) as afop:
+        dbmeta = await afop.file_to_db(rel_path)
+        if dbmeta is None:
+            return False
+
+        with dbop.Session() as session:
+            session.execute(
+                sa.delete(DBMeta).where(
+                    DBMeta.pool_id == pool.id,
+                    DBMeta.path == rel_path,
+                )
+            )
+            session.add(dbmeta)
+            session.commit()
+
+    if update_thumbs and dbmeta.ftype == "pic":
+        dbop.update_thumb_for_path(rel_path)
+    return True
+
+
 async def read_files_bulk(
     *,
     pool_id: int | None = None,
