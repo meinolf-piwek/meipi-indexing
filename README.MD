@@ -43,7 +43,6 @@ Wichtige Variablen:
 
 - `IND_PG_HOST`, `IND_PG_PORT`, `IND_PG_USER`, `IND_PG_DATABASE`
 - `IND_PG_API_KEY` (Keyring-Schluessel fuer das DB-Passwort)
-- `IND_DATADIR`
 - `IND_DOCSUF`, `IND_PICSUF`, `IND_VIDSUF`
 - `IND_TIKA_NOOCR_URL`, `IND_TIKA_OCRURL`
 

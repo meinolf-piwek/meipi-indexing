@@ -16,7 +16,6 @@ Beispiel für eine ``.env-Datei``::
     IND_PG_USER=postgres                    #PostgreSQL Username
     IND_PG_DATABASE=postgres                #PostgreSQL Database Name
     IND_PG_API_KEY=pg-docker                #API-Key-Name für das DB-Passwort im Keyring
-    IND_DATADIR=./data                  #Datenverzeichnis
     IND_DOCROOT=/home/rslsync/folders/  #Dokumenten-Root-Verzeichnis
     IND_LOGGER_NAME=sqlalchemy.engine          #Name des Loggers für SQLAlchemy
     IND_DOCSUF='{
@@ -99,7 +98,6 @@ class Config(BaseSettings):
     pg_api_key: str = Field(default="pg-docker")
     tika_noocr_url: str = Field(default="http://localhost:9998")
     tika_ocrurl: str = Field(default="http://localhost:9997")
-    datadir: str = Field(default="./data")
     docsuf: Set[str] = Field(default={".pdf",".txt",".md",".docx",".doc",
         ".html",".htm",".epub",".odt",})
     picsuf: Set[str] = Field(default={".jpg", ".jpeg", ".bmp", ".png", ".heic", ".tiff", ".tif"})
