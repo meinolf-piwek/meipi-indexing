@@ -29,7 +29,7 @@ from .config import Config
 from . import appconf
 
 def _dali_resizer(*args, **kwargs):
-    from .picture import DALIImageResizer
+    from .dali import DALIImageResizer
 
     return DALIImageResizer(*args, **kwargs)
 

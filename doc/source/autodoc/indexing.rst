@@ -36,10 +36,10 @@ meipi.indexing.search module
    :show-inheritance:
    :undoc-members:
 
-meipi.indexing.picture module
------------------------------
+meipi.indexing.dali module
+--------------------------
 
-.. automodule:: meipi.indexing.picture
+.. automodule:: meipi.indexing.dali
    :members:
    :show-inheritance:
    :undoc-members:
