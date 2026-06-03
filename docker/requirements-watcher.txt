@@ -1,0 +1,19 @@
+# Minimal runtime dependencies for the filesystem watcher (CPU, no CUDA/DALI).
+# Thumbnail generation is disabled by default in the Docker image (--no-thumbs).
+click>=8.1.8
+watchdog>=6.0.0
+sqlalchemy>=2.0.43
+psycopg[binary]>=3.2.10
+pgvector>=0.4.1
+pydantic-settings>=2.13.1
+dotenv>=0.9.9
+tika-client>=0.11.0
+tika>=3.1.0
+python-xmp-toolkit>=2.0.2
+tqdm>=4.67.1
+numpy>=2.2.6
+pillow>=11.3.0
+pillow-heif>=1.1.0
+imagehash>=4.3.2
+keyring>=25.6.0
+alembic>=1.18.4
