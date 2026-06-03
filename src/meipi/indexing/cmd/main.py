@@ -46,8 +46,8 @@ async def index_file(
             session.add(dbmeta)
             session.commit()
 
-    if update_thumbs and dbmeta.ftype == "pic":
-        dbop.update_thumb_for_path(rel_path)
+    if update_thumbs and dbmeta.ftype == "pic" and dbmeta.pic is not None:
+        dbop.update_thumb_for_pic(dbmeta.pic.id, rel_path)
     return True
 
 

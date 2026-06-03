@@ -250,22 +250,8 @@ class DBOperations():
             session.flush()
             session.commit()
 
-    def update_thumb_for_path(self, rel_path: str) -> bool:
-        """Generate a missing thumbnail for one indexed picture path."""
-        with self.Session() as session:
-            stmt = (
-                sa.select(DBPic.id)
-                .join(DBPic.meta)
-                .where(
-                    DBMeta.pool_id == self.pool.id,
-                    DBMeta.path == rel_path,
-                    DBPic.thumbarray.is_(None),
-                )
-            )
-            pic_id = session.scalars(stmt).first()
-        if pic_id is None:
-            return False
-
+    def update_thumb_for_pic(self, pic_id: int, rel_path: str) -> bool:
+        """Generate a thumbnail for one picture row."""
         full_path = os.path.join(self.docroot, rel_path)
         suffix = os.path.splitext(rel_path)[1]
         use_pil = suffix.lower() == ".heic"
@@ -282,6 +268,23 @@ class DBOperations():
             return False
         self.update_thumbs(list(zip(grespics, greslabels)))
         return True
+
+    def update_thumb_for_path(self, rel_path: str) -> bool:
+        """Generate a missing thumbnail for one indexed picture path."""
+        with self.Session() as session:
+            stmt = (
+                sa.select(DBPic.id)
+                .join(DBPic.meta)
+                .where(
+                    DBMeta.pool_id == self.pool.id,
+                    DBMeta.path == rel_path,
+                    DBPic.thumbarray.is_(None),
+                )
+            )
+            pic_id = session.scalars(stmt).first()
+        if pic_id is None:
+            return False
+        return self.update_thumb_for_pic(pic_id, rel_path)
 
 class AsyncFileOperations(AsyncTikaClient):
     """Async file parsing helpers built on top of ``tika_client``."""

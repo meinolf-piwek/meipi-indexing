@@ -14,6 +14,7 @@ from meipi.indexing.operations import DBOperations
 def main() -> int:
     name = os.environ.get("MEIPI_POOL_NAME")
     rootpath = os.environ.get("MEIPI_POOL_ROOTPATH")
+    description = os.environ.get("MEIPI_POOL_DESCRIPTION","Testpool")
     if not name or not rootpath:
         print("MEIPI_POOL_NAME and MEIPI_POOL_ROOTPATH are required", file=sys.stderr)
         return 1
@@ -22,7 +23,7 @@ def main() -> int:
     with dbop.Session() as session:
         pool = session.scalars(sa.select(DBPool).where(DBPool.pool == name)).first()
         if pool is None:
-            pool = DBPool(pool=name, rootpath=rootpath)
+            pool = DBPool(pool=name, rootpath=rootpath, description=description)
             session.add(pool)
             session.commit()
             session.refresh(pool)
