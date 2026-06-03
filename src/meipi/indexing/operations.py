@@ -251,22 +251,21 @@ class DBOperations():
             session.commit()
 
     def update_thumb_for_pic(self, pic_id: int, rel_path: str) -> bool:
-        """Generate a thumbnail for one picture row."""
+        """Generate a thumbnail for one picture row using PIL."""
+        from .thumbnail import make_thumbnail_array
+
         full_path = os.path.join(self.docroot, rel_path)
-        suffix = os.path.splitext(rel_path)[1]
-        use_pil = suffix.lower() == ".heic"
-        resizer = _dali_resizer(pipe_batch_size=1, num_threads=1)
-        grespics, greslabels, _, gerrlabels = resizer.resize_pics(
-            [(full_path, pic_id)],
-            batch_size=1,
-            use_PIL=use_pil,
-        )
-        if gerrlabels:
+        try:
+            thumb = make_thumbnail_array(full_path)
+        except Exception as exc:
             self.logger.warning(
-                "Thumbnail generation failed for %s (pic id %s)", rel_path, pic_id
+                "Thumbnail generation failed for %s (pic id %s): %s",
+                rel_path,
+                pic_id,
+                exc,
             )
             return False
-        self.update_thumbs(list(zip(grespics, greslabels)))
+        self.update_thumbs([(thumb, pic_id)])
         return True
 
     def update_thumb_for_path(self, rel_path: str) -> bool:

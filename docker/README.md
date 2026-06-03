@@ -54,7 +54,7 @@ Der `rootpath` des Datapools muss mit dem Mount-Pfad im Container übereinstimme
 | `MEIPI_WATCH_PATH` | `.` | Relativer Pfad unterhalb des Pools |
 | `MEIPI_INITIAL_SCAN` | `1` | Einmaliger Vollscan vor dem Watch |
 | `MEIPI_DEBOUNCE` | `1.0` | Sekunden bis zur Indexierung nach Änderung |
-| `MEIPI_NO_THUMBS` | `1` | Thumbnails deaktiviert (CPU-Image) |
+| `MEIPI_NO_THUMBS` | `0` | Thumbnails per PIL deaktivieren |
 | `MEIPI_ENSURE_TABLES` | `1` | `create-tables` beim Start |
 
 Alternativ kann statt Pool-Auto-Erstellung `MEIPI_POOL_ID` gesetzt werden, wenn der
@@ -76,7 +76,7 @@ docker run --rm \
 
 ## Hinweise
 
-- Thumbnails benötigen CUDA/DALI und sind in diesem schlanken Image standardmäßig
-  ausgeschaltet (`--no-thumbs`). Metadaten und Volltext werden trotzdem indexiert.
+- Einzelbild-Thumbnails laufen per PIL (kein CUDA/DALI nötig). Bulk-Backfills
+  (`update-thumbs`) nutzen weiterhin DALI, wenn verfügbar.
 - Der Keyring wird im Container nicht genutzt; setzen Sie `IND_PG_PASSWD` direkt.
 - Für Produktion: sichere Passwörter, persistente Volumes und ggf. separates Tika/OCR.

@@ -1,5 +1,5 @@
 # Filesystem watcher for meipi-indexing (CPU image, no CUDA/DALI).
-# Thumbnails are disabled by default; enable only with a GPU-capable custom build.
+# Thumbnails for single-file updates use PIL; bulk update-thumbs still needs CUDA/DALI.
 
 FROM python:3.13-slim-bookworm AS runtime
 
@@ -8,7 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
     MEIPI_CONFIG_ENV=/etc/meipi/config.env \
-    MEIPI_NO_THUMBS=1
+    MEIPI_NO_THUMBS=0
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
