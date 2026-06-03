@@ -24,7 +24,6 @@ COPY pyproject.toml README.MD LICENSE ./
 COPY src ./src
 COPY docker/requirements-watcher.txt ./docker/requirements-watcher.txt
 COPY docker/config.env ./docker/config.env
-COPY docker/ensure_pool.py ./docker/ensure_pool.py
 
 RUN pip install --upgrade pip \
     && pip install -r docker/requirements-watcher.txt \
