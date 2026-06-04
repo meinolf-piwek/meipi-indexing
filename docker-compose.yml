@@ -17,6 +17,9 @@ services:
   tika:
     image: apache/tika:latest-full
     restart: unless-stopped
+    command: ["-c", "/etc/tika/tika-config.xml"]
+    volumes:
+      - ./docker/tika-config.xml:/etc/tika/tika-config.xml:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:9998/tika || exit 1"]
       interval: 10s
@@ -42,14 +45,13 @@ services:
       IND_PG_DATABASE: ${POSTGRES_DB:-postgres}
       IND_PG_SCHEMA: ${IND_PG_SCHEMA:-meipi-indexing}
       IND_TIKA_NOOCR_URL: http://tika:9998
-      IND_TIKA_OCRURL: http://tika:9997
-      MEIPI_POOL_ID: ${MEIPI_POOL_ID:?Set MEIPI_POOL_ID in docker/.env}
-      MEIPI_POOL_ROOTPATH: ${MEIPI_POOL_ROOTPATH:-/data}
-      MEIPI_WATCH_PATH: ${MEIPI_WATCH_PATH:-.}
-      MEIPI_DEBOUNCE: ${MEIPI_DEBOUNCE:-1.0}
-      MEIPI_NO_THUMBS: ${MEIPI_NO_THUMBS:-0}
+      IND_WATCH_POOL_ID: ${IND_WATCH_POOL_ID:?Set IND_WATCH_POOL_ID in docker/.env}
+      IND_WATCH_POOL_ROOTPATH: ${IND_WATCH_POOL_ROOTPATH:-/data}
+      IND_WATCH_PATH: ${IND_WATCH_PATH:-.}
+      IND_WATCH_DEBOUNCE: ${IND_WATCH_DEBOUNCE:-1.0}
+      IND_WATCH_NO_THUMBS: ${IND_WATCH_NO_THUMBS:-0}
     volumes:
-      - ${HOST_DATA_DIR:-./data}:${MEIPI_POOL_ROOTPATH:-/data}
+      - ${HOST_DATA_DIR:-./data}:${IND_WATCH_POOL_ROOTPATH:-/data}
 
 volumes:
   postgres_data:

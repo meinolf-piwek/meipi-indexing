@@ -8,7 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
     MEIPI_CONFIG_ENV=/etc/meipi/config.env \
-    MEIPI_NO_THUMBS=0
+    IND_WATCH_NO_THUMBS=0
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
