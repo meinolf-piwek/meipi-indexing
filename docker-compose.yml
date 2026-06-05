@@ -3,8 +3,10 @@ services:
     image: apache/tika:latest-full
     restart: unless-stopped
     command: ["-c", "/etc/tika/tika-config.xml"]
+    ports:
+      - "9998:9998"
     volumes:
-      - ./docker/tika-config.xml:/etc/tika/tika-config.xml:ro
+      - /home/padmin/.config/tika/tika-config.xml:/etc/tika/tika-config.xml:ro
     networks:
       - postgresql_default
     healthcheck:

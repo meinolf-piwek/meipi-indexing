@@ -378,6 +378,7 @@ class AsyncFileOperations(AsyncTikaClient):
                 content = content[0] if content else ""
             if not isinstance(content, str):
                 content = str(content) if content else ""
+            content = content.strip("\n\r")
         except Exception as e:
             self.logger.error("Error %s parsing file %s", e, filepath)
             meta = {}

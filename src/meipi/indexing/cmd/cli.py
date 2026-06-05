@@ -273,7 +273,6 @@ def insert_docs(ctx: click.Context, pool_id: int, ocr: bool) -> None:
     "relpath",
     default=".",
     metavar="[RELPATH]",
-    type=click.Path(exists=True),
 )
 @click.option("--json", "as_json", is_flag=True, help="Print report as JSON")
 @click.option(
@@ -292,8 +291,8 @@ def check_sync(
 ) -> None:
     """Check filesystem and database sync for a pool (report only).
 
-    RELPATH is relative to IND_DOCROOT (or --docroot). An absolute path is accepted
-    when it lies under docroot; otherwise set --docroot to your indexed tree root.
+    RELPATH is relative to IND_DOCROOT (or --docroot), e.g. ``docs`` or ``.``.
+    Absolute paths under docroot are accepted; existence is checked against docroot, not cwd.
     """
     _print_sync_check(_db_ops(pool_id), relpath, as_json=as_json, verbose=verbose)
 
@@ -309,7 +308,6 @@ def check_sync(
     "relpath",
     default=".",
     metavar="[RELPATH]",
-    type=click.Path(exists=True),
 )
 @click.option(
     "--debounce",
@@ -350,7 +348,10 @@ def watch(
     check_json: bool,
     verbose: bool,
 ) -> None:
-    """Watch a pool directory and keep the index in sync with filesystem changes."""
+    """Watch a pool directory and keep the index in sync with filesystem changes.
+
+    RELPATH is relative to IND_DOCROOT (same as IND_WATCH_PATH in Docker), not the process cwd.
+    """
     dbop = _db_ops(pool_id)
     watcher = PoolWatcher(
         dbop,

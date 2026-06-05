@@ -16,10 +16,12 @@ from .cmd.main import index_file
 from .config import Config, resolve_config
 from .operations import DBOperations, WATCHER_TABLES
 from .paths import (
+    ensure_watch_directory,
     is_under_watch_tree,
     list_watch_files,
     normalize_rel_path,
     resolve_watch_relpath,
+    watch_abspath,
 )
 
 __all__ = [
@@ -236,7 +238,7 @@ def check_pool_sync(
     watch_relpath: str = ".",
 ) -> SyncReport:
     """Compare the watched filesystem tree with the database (report only)."""
-    watch_relpath = resolve_watch_relpath(dbop.docroot, watch_relpath)
+    watch_relpath = ensure_watch_directory(dbop.docroot, watch_relpath)
     schema_info = dbop.schema_info()
     existing_tables = set(schema_info["tables"])
     tables_missing = tuple(
@@ -285,7 +287,7 @@ class PoolWatcher:
     ) -> None:
         config = resolve_config(config)
         self.dbop = dbop
-        self.watch_relpath = resolve_watch_relpath(dbop.docroot, watch_relpath)
+        self.watch_relpath = ensure_watch_directory(dbop.docroot, watch_relpath)
         self.debounce_seconds = debounce_seconds
         self.update_thumbs = update_thumbs
         self.config = config
@@ -296,7 +298,7 @@ class PoolWatcher:
 
     @property
     def watch_abspath(self) -> str:
-        return os.path.join(self.dbop.docroot, self.watch_relpath)
+        return watch_abspath(self.dbop.docroot, self.watch_relpath)
 
     def _schedule_index(self, rel_path: str) -> None:
         with self._lock:

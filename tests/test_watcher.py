@@ -138,9 +138,10 @@ def test_handler_ignores_paths_outside_watch_tree(tmp_path: Path) -> None:
     assert deleted == []
 
 
-def test_watcher_watch_abspath(sample_pool, test_config) -> None:
-    watcher = PoolWatcher(
-        MagicMock(docroot=test_config.resolved_docroot(), pool=sample_pool),
-        watch_relpath="subdir",
-    )
+def test_watcher_watch_abspath(sample_pool, test_config, tmp_path) -> None:
+    docroot = tmp_path / "pool"
+    subdir = docroot / "subdir"
+    subdir.mkdir(parents=True)
+    dbop = MagicMock(docroot=str(docroot), pool=sample_pool)
+    watcher = PoolWatcher(dbop, watch_relpath="subdir")
     assert watcher.watch_abspath.endswith("/subdir")

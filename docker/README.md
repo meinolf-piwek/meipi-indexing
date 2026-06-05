@@ -52,7 +52,7 @@ docker compose down
 | `IND_PG_HOST` | `pg-db` | PostgreSQL-Hostname |
 | `IND_PG_USER` / `IND_PG_PASSWD` / `IND_PG_DATABASE` | — | DB-Zugangsdaten |
 | `IND_WATCH_POOL_ID` | — | **Pflicht.** Id eines bestehenden Datapools |
-| `IND_WATCH_PATH` | `.` | Relativer Pfad unterhalb von `IND_DOCROOT` |
+| `IND_WATCH_PATH` | `.` | Path under `IND_DOCROOT` (relative, e.g. `docs`, or absolute under docroot) |
 | `IND_WATCH_DEBOUNCE` | `1.0` | Sekunden bis zur Indexierung nach Änderung |
 | `IND_WATCH_NO_THUMBS` | `0` | Thumbnails per PIL deaktivieren |
 

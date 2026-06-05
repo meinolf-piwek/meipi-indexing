@@ -58,6 +58,30 @@ def test_normalize_rel_path_converts_backslashes() -> None:
     assert normalize_rel_path("docs\\a.txt") == "docs/a.txt"
 
 
+def test_resolve_watch_relpath_relative_to_docroot(tmp_path: Path) -> None:
+    from meipi.indexing.paths import ensure_watch_directory, resolve_watch_relpath
+
+    docroot = tmp_path / "data"
+    docs = docroot / "docs"
+    docs.mkdir(parents=True)
+
+    assert resolve_watch_relpath(str(docroot), "docs") == "docs"
+    assert resolve_watch_relpath(str(docroot), "./docs") == "docs"
+    assert ensure_watch_directory(str(docroot), "docs") == "docs"
+
+
+def test_list_watch_files_relative_path_not_cwd(tmp_path: Path, monkeypatch) -> None:
+    docroot = tmp_path / "data"
+    docs = docroot / "docs"
+    docs.mkdir(parents=True)
+    (docs / "in.txt").write_text("in", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    paths = list_watch_files(str(docroot), "docs")
+
+    assert paths == {"docs/in.txt"}
+
+
 def test_resolve_watch_relpath_absolute_under_docroot(tmp_path: Path) -> None:
     from meipi.indexing.paths import resolve_watch_relpath
 
