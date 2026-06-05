@@ -4,10 +4,10 @@ Neben der hier definierten default-Konfiguration,
 können die Werte auch über eine .env-Datei oder direkt über Umgebungsvariablen überschrieben werden.
 Die .env-Datei sollte im Root-Verzeichnis der App liegen und den Namen "config.env" tragen.
 
-Die globale Instanz ``appconf`` wird einmal beim Import von ``meipi.indexing`` erzeugt und ist danach
-unveränderlich. Änderungen an ``config.env``, Umgebungsvariablen oder ``MEIPI_CONFIG_ENV`` wirken
-erst nach einem vollständigen Neustart des Python-Prozesses (CLI erneut ausführen, Notebook-Kernel
-neu starten, Streamlit-App neu starten).
+Die globale Instanz ``appconf`` wird einmal beim Import von ``meipi.indexing`` erzeugt. Felder können
+zur Laufzeit gesetzt werden (z. B. ``--docroot`` in der CLI) oder per ``reload_appconf()`` aus
+``config.env`` / ``MEIPI_CONFIG_ENV`` neu geladen werden. Bestehende ``DBOperations``-Instanzen
+behalten danach ihre alte Engine (``search_path``) — neu anlegen nach einem Reload.
 
 Beispiel für eine ``.env-Datei``::
 
@@ -59,11 +59,10 @@ Alternatives Env-File vor dem Start setzen::
 
 from typing import Set
 import logging
+import os
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from sqlalchemy import URL as saURL
-import keyring
-from keyring.backends.SecretService import Keyring as SecretServiceKeyring
+from sqlalchemy import MetaData, URL as saURL
 #from pillow_heif import register_heif_opener
 #from PIL import ImageFile
 
@@ -77,9 +76,9 @@ class FTYPE():
 class Config(BaseSettings):
     """Enthält die Konfiguration der App
 
-    Instanzen sind unveränderlich (frozen). Erzeugen Sie für andere Env-Dateien eine neue
-    ``Config`` nur in Tests oder vor dem ersten Import von ``meipi.indexing``; zur Laufzeit
-    gilt ausschließlich ``appconf``.
+    Zur Laufzeit gilt ``appconf``; Felder können in-process geändert werden (z. B. CLI-Overrides).
+    Das PostgreSQL-Schema wird über ``pg_schema`` (``search_path``) gesteuert, nicht über qualifizierte
+    Tabellennamen in den ORM-``Table``-Objekten.
     """
     envfile: str = Field(default="config.env", description="Path used when this config was loaded")
     model_config = SettingsConfigDict(
@@ -87,7 +86,6 @@ class Config(BaseSettings):
         env_file_encoding="utf-8",
         env_prefix="IND_",
         case_sensitive=False,
-        frozen=True,
     )
     pg_host: str = Field(default="localhost")
     pg_port: str = Field(default="5432")
@@ -98,6 +96,10 @@ class Config(BaseSettings):
     pg_api_key: str = Field(default="pg-docker")
     tika_noocr_url: str = Field(default="http://localhost:9998")
     tika_ocrurl: str = Field(default="http://localhost:9997")
+    docroot: str = Field(
+        default=".",
+        description="Filesystem root; file paths in the DB are relative to this directory",
+    )
     docsuf: Set[str] = Field(default={".pdf",".txt",".md",".docx",".doc",
         ".html",".htm",".epub",".odt",})
     picsuf: Set[str] = Field(default={".jpg", ".jpeg", ".bmp", ".png", ".heic", ".tiff", ".tif"})
@@ -109,22 +111,44 @@ class Config(BaseSettings):
     def logger(self):
         return logging.getLogger(self.logger_name)
 
+    @property
+    def metadata(self) -> MetaData:
+        """Shared ORM ``MetaData`` (tables are unqualified; schema via ``pg_schema`` / search_path)."""
+        from meipi.indexing.model import orm_metadata
+
+        return orm_metadata
+
+    def resolved_docroot(self) -> str:
+        """Absolute path to the configured filesystem root."""
+        return os.path.abspath(self.docroot)
+
     @classmethod
     def load(cls, envfile: str = "config.env") -> "Config":
-        """Load settings from *envfile* (used at package import, not for hot reload)."""
-        return cls(envfile=envfile)
+        """Load settings from *envfile* (env vars still override file values)."""
+        return cls(_env_file=envfile, envfile=envfile)
 
     def db_passwd_from_keyring(self) -> str:
-        """DB Password aus Keyring holen, oder Default-Wert verwenden."""
-        keyring.set_keyring(SecretServiceKeyring())
-        pwd = keyring.get_password("API-Keys", self.pg_api_key)
-        if pwd is None:
+        """DB password from SecretService keyring when D-Bus is available, else ``pg_passwd``."""
+        if not os.environ.get("DBUS_SESSION_BUS_ADDRESS"):
+            return self.pg_passwd
+        try:
+            import keyring
+            from keyring.backends.SecretService import Keyring as SecretServiceKeyring
+
+            keyring.set_keyring(SecretServiceKeyring())
+            pwd = keyring.get_password("API-Keys", self.pg_api_key)
+            if pwd is not None:
+                return pwd
             self.logger.warning(
-                "Kein Passwort für API-Key '%s' im Keyring gefunden, verwende Default-Wert",
+                "Kein Passwort für API-Key '%s' im Keyring gefunden, verwende pg_passwd aus Konfiguration",
                 self.pg_api_key,
             )
-            return self.pg_passwd
-        return pwd
+        except Exception as exc:
+            self.logger.warning(
+                "Keyring nicht verfügbar (%s), verwende pg_passwd aus Konfiguration",
+                exc,
+            )
+        return self.pg_passwd
             
 
     @property
@@ -154,9 +178,43 @@ class Config(BaseSettings):
             return FTYPE.UNK
             
 
-def reload_appconf() -> None:
-    """Configuration cannot be reloaded in-process."""
-    raise RuntimeError(
-        "appconf cannot be reloaded. Set MEIPI_CONFIG_ENV or edit config.env, "
-        "then restart the Python process (re-run CLI, restart Streamlit, or reload the notebook kernel)."
-    )
+def resolve_config(config: Config | None) -> Config:
+    """Return *config* or the process-wide ``appconf``."""
+    if config is None:
+        import meipi.indexing as indexing_pkg
+
+        return indexing_pkg.appconf
+    return config
+
+
+def reload_appconf(envfile: str | None = None) -> Config:
+    """Reload the process-wide ``appconf`` from disk into the existing instance.
+
+    Uses *envfile*, else ``MEIPI_CONFIG_ENV``, else ``appconf.envfile``.
+    In-place update keeps ``from meipi.indexing import appconf`` bindings valid.
+    Create new ``DBOperations`` afterwards if connection settings changed.
+    """
+    import meipi.indexing as indexing_pkg
+
+    path = envfile or os.environ.get("MEIPI_CONFIG_ENV") or indexing_pkg.appconf.envfile
+    fresh = Config.load(path)
+    current = indexing_pkg.appconf
+    for field_name in Config.model_fields:
+        setattr(current, field_name, getattr(fresh, field_name))
+    return current
+
+
+def install_appconf(config: Config) -> None:
+    """Replace the process-wide ``appconf``."""
+    import sys
+
+    import meipi.indexing as indexing_pkg
+
+    indexing_pkg.appconf = config  # type: ignore[misc, assignment]
+
+    for mod in list(sys.modules.values()):
+        if mod is None:
+            continue
+        name = getattr(mod, "__name__", "")
+        if name.startswith("meipi.indexing") and hasattr(mod, "appconf"):
+            mod.appconf = config #type: ignore[assignment]
