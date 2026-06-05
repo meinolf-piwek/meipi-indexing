@@ -213,7 +213,6 @@ class DBMeta(Base):
         default="",
         nullable=False,
         kw_only=True,
-        deferred=True,
         doc="Extracted text content (all file types)",
     )
     ts_content: Mapped[TSVECTOR] = mapped_column(

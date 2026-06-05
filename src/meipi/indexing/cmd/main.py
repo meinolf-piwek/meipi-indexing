@@ -43,7 +43,9 @@ async def index_file(
                     DBMeta.path == rel_path,
                 )
             )
+            session.flush()
             session.add(dbmeta)
+            session.flush()
             session.commit()
 
     if update_thumbs and dbmeta.ftype == "pic" and dbmeta.pic is not None:

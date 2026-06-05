@@ -374,6 +374,10 @@ class AsyncFileOperations(AsyncTikaClient):
             meta: dict = parsed[0].data
             meta = json.loads(json.dumps(parsed[0].data).replace("\\u0000", "null"))
             content = meta.pop(TikaKey.Content, "")  # type: ignore
+            if isinstance(content, list):
+                content = content[0] if content else ""
+            if not isinstance(content, str):
+                content = str(content) if content else ""
         except Exception as e:
             self.logger.error("Error %s parsing file %s", e, filepath)
             meta = {}
@@ -408,12 +412,11 @@ class AsyncFileOperations(AsyncTikaClient):
             sha256 = file_digest(f, "sha256")
         try:
             dbmeta = DBMeta(
-                #id = None, # type: ignore
-                pool_id= self.pool.id,
+                pool_id=self.pool.id,
                 path=path,
                 fname=os.path.basename(path),
                 fdate=fdate,
-                sort_date= doc_cdate,
+                sort_date=doc_cdate,
                 fsize=fsize,
                 clength=content_length,
                 ctype=meta.get("Content-Type", "unk/unk"),
@@ -422,6 +425,7 @@ class AsyncFileOperations(AsyncTikaClient):
                 ftype=ftype,
                 sha256=sha256.digest(),
                 meta_data=meta,
+                inhalt=content,
             )
         except Exception as e:
             self.logger.error("Error %s creating DBMeta fpath %s", e, rel_path)
@@ -457,7 +461,6 @@ class AsyncFileOperations(AsyncTikaClient):
         if dbmeta is None:
             return None
 
-        dbmeta.inhalt = content
         if dbmeta.ftype == "doc":
             dbmeta.doc = DBDoc()
         if dbmeta.ftype == "pic":
