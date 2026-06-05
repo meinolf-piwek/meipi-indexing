@@ -3,8 +3,10 @@
 Dieser Stack startet Apache Tika und den Datei-Watcher. PostgreSQL läuft
 extern (Container `pg-db` im Docker-Netzwerk `postgresql_default`).
 
-Der Watcher **überwacht nur** — Tabellen, Datapool und Erstindexierung müssen
-vorher manuell angelegt werden.
+Beim Start prüft der Watcher, ob Datenbank und Dateisystem übereinstimmen, und
+meldet Schema-Informationen sowie Abweichungen (ohne sie zu beheben). Derselbe
+Check ist separat verfügbar: ``meipi-index check-sync --pool-id 1 .``
+Tabellen, Datapool und Erstindexierung müssen vorher angelegt werden.
 
 ## Voraussetzungen
 

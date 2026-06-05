@@ -24,8 +24,16 @@ import numpy as np
 from libxmp import utils as xmpu
 import sqlalchemy as sa
 from sqlalchemy.orm import sessionmaker, Session
-from .model import Base as ModelBase, DBMeta, DBPic, DBDoc, DBDinoV2Vector, DBVid, IdList,DBPool
+from .model import Base as ModelBase, DBMeta, DBPic, DBDoc, DBDinoV2Vector, DBVid, IdList, DBPool
 from .config import Config, resolve_config
+
+WATCHER_TABLES: tuple[type[ModelBase], ...] = (
+    DBPool,
+    DBMeta,
+    DBPic,
+    DBDoc,
+    DBVid,
+)
 
 def _dali_resizer(*args, **kwargs):
     from .dali import DALIImageResizer
@@ -111,22 +119,60 @@ class DBOperations():
             self.logger.info("Pool created with id %s", pool.id)
             return pool
     
-    def create_tables(self, entities:Optional[Sequence[type[ModelBase]]]=None):
+    def create_tables(self, entities: Optional[Sequence[type[ModelBase]]] = None):
         """Erstellt die Tabellen in der Datenbank, falls sie noch nicht existieren."""
-        if not entities:
-            tables = None
+        if entities:
+            tables = [entity.__table__ for entity in entities]  # type: ignore[misc]
         else:
-            tables = [entity.__tablename__ for entity in entities]
+            tables = None
         self.metadata.create_all(self.engine, tables=tables)
-        
-    def recreate_tables(self, entities:Optional[Sequence[type[ModelBase]]]=None):
+
+    def recreate_tables(self, entities: Optional[Sequence[type[ModelBase]]] = None):
         """Recreate tables in the database."""
-        if not entities:
-            tables = None
+        if entities:
+            tables = [entity.__table__ for entity in entities]  # type: ignore[misc]
         else:
-            tables = [entity.__tablename__ for entity in entities]
+            tables = None
         self.metadata.drop_all(self.engine, tables=tables)
         self.metadata.create_all(self.engine, tables=tables)
+
+    def ensure_tables(
+        self, entities: Sequence[type[ModelBase]] | None = None
+    ) -> list[str]:
+        """Create ORM tables that are missing in the database."""
+        entities = tuple(entities or WATCHER_TABLES)
+        existing = set(self.schema_info()["tables"])
+        missing = [entity for entity in entities if entity.__tablename__ not in existing]
+        if missing:
+            self.create_tables(entities=missing)
+        return [entity.__tablename__ for entity in missing]
+
+    def count_pool_filemeta(self) -> int:
+        """Return the number of filemeta rows for the current pool."""
+        with self.Session() as session:
+            return int(
+                session.scalar(
+                    sa.select(sa.func.count())
+                    .select_from(DBMeta)
+                    .where(DBMeta.pool_id == self.pool.id)
+                )
+                or 0
+            )
+
+    def list_pool_file_paths(self, watch_relpath: str = ".") -> set[str]:
+        """Return indexed paths for the current pool inside the watched subtree."""
+        from .paths import normalize_rel_path
+
+        watch_relpath = normalize_rel_path(watch_relpath)
+        stmt = sa.select(DBMeta.path).where(DBMeta.pool_id == self.pool.id)
+        if watch_relpath not in ("", "."):
+            prefix = watch_relpath + "/"
+            stmt = stmt.where(
+                sa.or_(DBMeta.path == watch_relpath, DBMeta.path.like(f"{prefix}%"))
+            )
+        with self.Session() as session:
+            paths = session.scalars(stmt).all()
+        return {normalize_rel_path(path) for path in paths}
         
          
     def clear_pool(self):
