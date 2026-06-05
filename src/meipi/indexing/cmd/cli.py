@@ -12,12 +12,26 @@ import click
 from .. import appconf
 from ..model import DBPool
 from ..operations import DBOperations
-from ..watcher import PoolWatcher
+from ..watcher import PoolWatcher, check_pool_sync, format_sync_report
 from .main import read_files_bulk
 
 
 def _db_ops(pool_id: int) -> DBOperations:
     return DBOperations(pool_id=pool_id)
+
+
+def _print_sync_check(
+    dbop: DBOperations,
+    relpath: str,
+    *,
+    as_json: bool,
+    verbose: bool,
+) -> None:
+    report = check_pool_sync(dbop, watch_relpath=relpath)
+    if as_json:
+        click.echo(json.dumps(report.as_dict(verbose=verbose), indent=2))
+    else:
+        click.echo(format_sync_report(report, verbose=verbose))
 
 
 @click.group()
@@ -248,6 +262,42 @@ def insert_docs(ctx: click.Context, pool_id: int, ocr: bool) -> None:
     click.echo(f"Inserted document rows for pool {pool_id}.")
 
 
+@cli.command("check-sync")
+@click.option(
+    "--pool-id",
+    type=int,
+    required=True,
+    help="Datapool id from the datapools table",
+)
+@click.argument(
+    "relpath",
+    default=".",
+    metavar="[RELPATH]",
+    type=click.Path(exists=True),
+)
+@click.option("--json", "as_json", is_flag=True, help="Print report as JSON")
+@click.option(
+    "-v",
+    "--verbose",
+    is_flag=True,
+    help="List tables, row counts, and individual file paths",
+)
+@click.pass_context
+def check_sync(
+    ctx: click.Context,
+    pool_id: int,
+    relpath: str,
+    as_json: bool,
+    verbose: bool,
+) -> None:
+    """Check filesystem and database sync for a pool (report only).
+
+    RELPATH is relative to IND_DOCROOT (or --docroot). An absolute path is accepted
+    when it lies under docroot; otherwise set --docroot to your indexed tree root.
+    """
+    _print_sync_check(_db_ops(pool_id), relpath, as_json=as_json, verbose=verbose)
+
+
 @cli.command("watch")
 @click.option(
     "--pool-id",
@@ -255,7 +305,12 @@ def insert_docs(ctx: click.Context, pool_id: int, ocr: bool) -> None:
     required=True,
     help="Datapool id from the datapools table",
 )
-@click.argument("relpath", default=".")
+@click.argument(
+    "relpath",
+    default=".",
+    metavar="[RELPATH]",
+    type=click.Path(exists=True),
+)
 @click.option(
     "--debounce",
     type=float,
@@ -269,9 +324,20 @@ def insert_docs(ctx: click.Context, pool_id: int, ocr: bool) -> None:
     help="Skip thumbnail generation when indexing changed files",
 )
 @click.option(
-    "--initial-scan",
+    "--no-startup-check",
     is_flag=True,
-    help="Run incremental read-files once before watching",
+    help="Skip startup sync check (schema info and DB vs filesystem diff)",
+)
+@click.option(
+    "--check-json",
+    is_flag=True,
+    help="Print startup check report as JSON",
+)
+@click.option(
+    "-v",
+    "--verbose",
+    is_flag=True,
+    help="Verbose startup check (tables, row counts, file paths)",
 )
 @click.pass_context
 def watch(
@@ -280,27 +346,21 @@ def watch(
     relpath: str,
     debounce: float,
     no_thumbs: bool,
-    initial_scan: bool,
+    no_startup_check: bool,
+    check_json: bool,
+    verbose: bool,
 ) -> None:
     """Watch a pool directory and keep the index in sync with filesystem changes."""
     dbop = _db_ops(pool_id)
-    if initial_scan:
-        click.echo(f"Initial scan of {relpath!r} for pool {pool_id}...")
-        asyncio.run(
-            read_files_bulk(
-                pool_id=pool_id,
-                relpath=relpath,
-                incremental=True,
-                update_thumbs=not no_thumbs,
-            )
-        )
-
     watcher = PoolWatcher(
         dbop,
         watch_relpath=relpath,
         debounce_seconds=debounce,
         update_thumbs=not no_thumbs,
     )
+    if not no_startup_check:
+        click.echo(f"Startup check for pool {pool_id} at {relpath!r}...")
+        _print_sync_check(dbop, relpath, as_json=check_json, verbose=verbose)
     click.echo(
         f"Watching {watcher.watch_abspath!r} for pool {pool_id} "
         f"(Ctrl+C to stop)..."

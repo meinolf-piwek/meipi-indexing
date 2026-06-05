@@ -5,29 +5,33 @@ from __future__ import annotations
 import asyncio
 import os
 import threading
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
 from .cmd.main import index_file
 from .config import Config, resolve_config
-from .operations import DBOperations
+from .operations import DBOperations, WATCHER_TABLES
+from .paths import (
+    is_under_watch_tree,
+    list_watch_files,
+    normalize_rel_path,
+    resolve_watch_relpath,
+)
 
-
-def normalize_rel_path(path: str) -> str:
-    """Normalize a relative path for stable DB lookups."""
-    return os.path.normpath(path).replace("\\", "/")
-
-
-def is_under_watch_tree(rel_path: str, watch_relpath: str) -> bool:
-    """Return whether ``rel_path`` lies inside the watched subtree."""
-    rel_path = normalize_rel_path(rel_path)
-    watch_relpath = normalize_rel_path(watch_relpath)
-    if watch_relpath in ("", "."):
-        return True
-    return rel_path == watch_relpath or rel_path.startswith(watch_relpath + os.sep)
+__all__ = [
+    "PoolWatcher",
+    "PoolIndexHandler",
+    "SyncReport",
+    "check_pool_sync",
+    "format_sync_report",
+    "is_under_watch_tree",
+    "list_watch_files",
+    "normalize_rel_path",
+]
 
 
 class PoolIndexHandler(FileSystemEventHandler):
@@ -95,6 +99,178 @@ class PoolIndexHandler(FileSystemEventHandler):
         self._handle_path(event.dest_path, index=True)
 
 
+@dataclass(frozen=True, slots=True)
+class SyncReport:
+    """Filesystem/database sync check (report only; no changes applied)."""
+
+    schema: str
+    pool_id: int
+    docroot: str
+    watch_relpath: str
+    schema_tables: dict[str, int]
+    tables_missing: tuple[str, ...]
+    filemeta_rows: int
+    pool_indexed_count: int
+    fs_count: int
+    watch_indexed_count: int
+    in_sync: tuple[str, ...]
+    only_on_disk: tuple[str, ...]
+    only_in_db: tuple[str, ...]
+
+    @property
+    def has_differences(self) -> bool:
+        return bool(self.tables_missing or self.only_in_db or self.only_on_disk)
+
+    @property
+    def watch_path_mismatch(self) -> bool:
+        """True when the watch path overlaps neither disk files nor indexed paths."""
+        return (
+            self.pool_indexed_count > 0
+            and self.watch_indexed_count == 0
+            and self.fs_count == 0
+        )
+
+    def as_dict(self, *, verbose: bool = False) -> dict[str, Any]:
+        summary: dict[str, Any] = {
+            "schema": self.schema,
+            "pool_id": self.pool_id,
+            "docroot": self.docroot,
+            "watch_relpath": self.watch_relpath,
+            "watch_path_mismatch": self.watch_path_mismatch,
+            "schema_table_count": len(self.schema_tables),
+            "filemeta_rows": self.filemeta_rows,
+            "pool_indexed_count": self.pool_indexed_count,
+            "tables_missing_count": len(self.tables_missing),
+            "has_differences": self.has_differences,
+            "filesystem": {
+                "watch_tree_file_count": self.fs_count,
+                "only_on_disk_count": len(self.only_on_disk),
+            },
+            "database": {
+                "watch_tree_indexed_count": self.watch_indexed_count,
+                "only_in_db_count": len(self.only_in_db),
+            },
+            "matched_count": len(self.in_sync),
+        }
+        if not verbose:
+            return summary
+        return {
+            **summary,
+            "tables": self.schema_tables,
+            "tables_missing": list(self.tables_missing),
+            "filesystem": {
+                "watch_tree_file_count": self.fs_count,
+                "only_on_disk": list(self.only_on_disk),
+            },
+            "database": {
+                "watch_tree_indexed_count": self.watch_indexed_count,
+                "only_in_db": list(self.only_in_db),
+            },
+            "matched": {
+                "count": len(self.in_sync),
+                "paths": list(self.in_sync),
+            },
+        }
+
+    def format(self, *, verbose: bool = False) -> str:
+        return format_sync_report(self, verbose=verbose)
+
+
+def format_sync_report(report: SyncReport, *, verbose: bool = False) -> str:
+    """Human-readable sync check report (summary by default)."""
+    lines = [
+        f"Schema: {report.schema} ({len(report.schema_tables)} tables)",
+        (
+            f"filemeta: {report.filemeta_rows:,} rows in schema · "
+            f"pool {report.pool_id}: {report.pool_indexed_count:,} indexed paths"
+        ),
+    ]
+    if report.tables_missing:
+        lines.append(f"Missing tables: {len(report.tables_missing)}")
+
+    lines.append(
+        f"Watch tree: {report.fs_count:,} files on disk · "
+        f"{report.watch_indexed_count:,} indexed in tree · "
+        f"{len(report.in_sync):,} matched"
+    )
+    if report.only_in_db:
+        lines.append(f"Only in DB: {len(report.only_in_db)}")
+    if report.only_on_disk:
+        lines.append(f"Only on disk: {len(report.only_on_disk)}")
+
+    if verbose:
+        if report.schema_tables:
+            lines.append("Table rows:")
+            for name, count in sorted(report.schema_tables.items()):
+                lines.append(f"  {name:<20}: {count:>10,} rows")
+        if report.tables_missing:
+            lines.append(f"Missing: {', '.join(report.tables_missing)}")
+        if report.only_in_db:
+            lines.append("Only in DB:")
+            lines.extend(f"  - {path}" for path in report.only_in_db)
+        if report.only_on_disk:
+            lines.append("Only on disk:")
+            lines.extend(f"  - {path}" for path in report.only_on_disk)
+        if report.in_sync:
+            lines.append("Matched:")
+            lines.extend(f"  - {path}" for path in report.in_sync)
+
+    if report.watch_path_mismatch:
+        lines.append(
+            f"Watch path {report.watch_relpath!r} under docroot {report.docroot!r} "
+            "matches no files on disk and no indexed paths for this pool"
+        )
+        lines.append(
+            "Hint: RELPATH is relative to IND_DOCROOT; use --docroot for the filesystem root"
+        )
+    elif report.has_differences:
+        lines.append("Differences found (no changes applied)")
+    else:
+        lines.append("Filesystem and database are in sync")
+    return "\n".join(lines)
+
+
+def check_pool_sync(
+    dbop: DBOperations,
+    *,
+    watch_relpath: str = ".",
+) -> SyncReport:
+    """Compare the watched filesystem tree with the database (report only)."""
+    watch_relpath = resolve_watch_relpath(dbop.docroot, watch_relpath)
+    schema_info = dbop.schema_info()
+    existing_tables = set(schema_info["tables"])
+    tables_missing = tuple(
+        entity.__tablename__
+        for entity in WATCHER_TABLES
+        if entity.__tablename__ not in existing_tables
+    )
+
+    filemeta_rows = int(schema_info["tables"].get("filemeta", 0))
+    pool_indexed_count = dbop.count_pool_filemeta()
+
+    fs_paths = list_watch_files(dbop.docroot, watch_relpath)
+    db_paths = dbop.list_pool_file_paths(watch_relpath)
+    in_sync = sorted(fs_paths & db_paths)
+    only_in_db = sorted(db_paths - fs_paths)
+    only_on_disk = sorted(fs_paths - db_paths)
+
+    return SyncReport(
+        schema=schema_info["schema"],
+        pool_id=dbop.pool.id,
+        docroot=dbop.docroot,
+        watch_relpath=watch_relpath,
+        schema_tables=dict(schema_info["tables"]),
+        tables_missing=tables_missing,
+        filemeta_rows=filemeta_rows,
+        pool_indexed_count=pool_indexed_count,
+        fs_count=len(fs_paths),
+        watch_indexed_count=len(db_paths),
+        in_sync=tuple(in_sync),
+        only_on_disk=tuple(only_on_disk),
+        only_in_db=tuple(only_in_db),
+    )
+
+
 class PoolWatcher:
     """Watch a datapool directory and sync file changes to PostgreSQL."""
 
@@ -109,7 +285,7 @@ class PoolWatcher:
     ) -> None:
         config = resolve_config(config)
         self.dbop = dbop
-        self.watch_relpath = watch_relpath
+        self.watch_relpath = resolve_watch_relpath(dbop.docroot, watch_relpath)
         self.debounce_seconds = debounce_seconds
         self.update_thumbs = update_thumbs
         self.config = config
@@ -165,8 +341,15 @@ class PoolWatcher:
         except Exception:
             self.logger.exception("Failed to delete index entry for %s", rel_path)
 
-    def run(self, *, block: bool = True) -> None:
+    def check_at_startup(self) -> SyncReport:
+        """Check database tables and index rows against the watched tree."""
+        return check_pool_sync(self.dbop, watch_relpath=self.watch_relpath)
+
+    def run(self, *, block: bool = True, startup_check: bool = False) -> SyncReport | None:
         """Start watching until interrupted or ``block=False``."""
+        report: SyncReport | None = None
+        if startup_check:
+            report = self.check_at_startup()
         watch_path = Path(self.watch_abspath)
         if not watch_path.is_dir():
             raise ValueError(f"Watch path is not a directory: {watch_path}")
@@ -192,6 +375,7 @@ class PoolWatcher:
                 observer.join()
             except KeyboardInterrupt:
                 self.stop()
+        return report
 
     def stop(self) -> None:
         """Stop the observer and cancel pending index timers."""
