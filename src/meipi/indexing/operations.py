@@ -25,8 +25,7 @@ from libxmp import utils as xmpu
 import sqlalchemy as sa
 from sqlalchemy.orm import sessionmaker, Session
 from .model import Base as ModelBase, DBMeta, DBPic, DBDoc, DBDinoV2Vector, DBVid, IdList,DBPool
-from .config import Config
-from . import appconf
+from .config import Config, resolve_config
 
 def _dali_resizer(*args, **kwargs):
     from .dali import DALIImageResizer
@@ -42,15 +41,17 @@ class DBOperations():
         pool: DBPool | None = None,
         *,
         allow_no_pool: bool = False,
-        #config: Config = appconf,
+        config: Config | None = None,
         enginekwargs: dict | None = None,
         sessionkwargs: dict | None = None,
     ):
-        self.config = appconf
+        config = resolve_config(config)
+        self.config = config
         enginekwargs = {} if not enginekwargs else enginekwargs
         sessionkwargs = {} if not sessionkwargs else sessionkwargs
-        self.metadata = ModelBase.metadata
-        connect_args={"options": f"-c search_path={self.metadata.schema}"}
+        self.metadata = config.metadata
+        self.pg_schema = config.pg_schema
+        connect_args = {"options": f"-c search_path={config.pg_schema}"}
         self.engine = sa.create_engine(self.config.db_conn_URL, connect_args = connect_args,
         logging_name="DBOperations",pool_logging_name=self.config.logger_name, **enginekwargs)
         self.logger = self.config.logger
@@ -73,22 +74,24 @@ class DBOperations():
                 "No pool provided; filesystem operations require pool_id or pool"
             )
             self.pool = DBPool(
-                id=0, pool="default", rootpath="", description="Default pool"
+                id=0, pool="default", description="Default pool"
             )
         else:
             raise ValueError("Either pool_id or pool must be provided")
-        self.docroot = self.pool.rootpath
+        self.docroot = config.resolved_docroot()
 
     def schema_info(self) -> dict[str, Any]:
         """Get the schema information of the database."""
         tables = {}
         with self.Session() as session:
             cat = sa.Table('pg_tables', sa.MetaData(schema='pg_catalog'), autoload_with=self.engine)
-            for tname in session.scalars(sa.select(cat.c.tablename).where(cat.c.schemaname == self.metadata.schema)):
-                table = sa.Table(tname, self.metadata,autoload_with=self.engine)
+            for tname in session.scalars(
+                sa.select(cat.c.tablename).where(cat.c.schemaname == self.pg_schema)
+            ):
+                table = sa.Table(tname, self.metadata, autoload_with=self.engine)
                 stmt = sa.select(sa.func.count()).select_from(table)
                 tables[tname] = session.scalars(stmt).one()
-        return {"schema":self.metadata.schema, "tables": tables} 
+        return {"schema": self.pg_schema, "tables": tables} 
         
     def get_pool(self, pool_id: int)-> DBPool:
         """Get the pool with the given id."""
@@ -105,7 +108,6 @@ class DBOperations():
             session.commit()
             session.refresh(pool)
             self.pool = pool
-            self.docroot = pool.rootpath
             self.logger.info("Pool created with id %s", pool.id)
             return pool
     
@@ -287,11 +289,18 @@ class DBOperations():
 
 class AsyncFileOperations(AsyncTikaClient):
     """Async file parsing helpers built on top of ``tika_client``."""
-    def __init__(self, pool:DBPool, config: Config = appconf, 
-            skip_ocr: bool = True, timeout: float = 30, compress=True):
+    def __init__(
+        self,
+        pool: DBPool,
+        config: Config | None = None,
+        skip_ocr: bool = True,
+        timeout: float = 30,
+        compress=True,
+    ):
+        config = resolve_config(config)
         self.config = config
         self.logger = config.logger
-        self.docroot = pool.rootpath
+        self.docroot = config.resolved_docroot()
         self.tika_url = config.tika_noocr_url if skip_ocr else config.tika_ocrurl
         self.pool = pool
         super().__init__(self.tika_url, timeout=timeout, compress=compress)

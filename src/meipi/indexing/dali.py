@@ -23,8 +23,7 @@ from nvidia.dali.plugin.base_iterator import LastBatchPolicy
 from nvidia.dali.plugin.pytorch import DALIClassificationIterator
 import cupy as cp
 from .model import IdList
-from .config import Config
-from . import appconf
+from .config import Config, resolve_config
 
 register_heif_opener()
 ImageFile.LOAD_TRUNCATED_IMAGES = True
@@ -70,9 +69,10 @@ class DALIImageResizer:
         labels: Sequence[int] = (),
         pipe_batch_size: int = 1,
         num_threads: int = 1,
-        config: Config = appconf,
+        config: Config | None = None,
         #use_PIL: bool = False,
     ):
+        config = resolve_config(config)
         self.config = config
         self.logger = config.logger
         self.files = files

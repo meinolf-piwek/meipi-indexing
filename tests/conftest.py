@@ -12,8 +12,10 @@ from meipi.indexing.model import DBPool
 
 
 @pytest.fixture
-def test_config(monkeypatch: pytest.MonkeyPatch) -> Config:
+def test_config(tmp_path, monkeypatch: pytest.MonkeyPatch) -> Config:
     """Config that never touches the system keyring."""
+    docroot = tmp_path / "docs"
+    docroot.mkdir()
     monkeypatch.setattr(
         Config,
         "db_passwd_from_keyring",
@@ -26,17 +28,15 @@ def test_config(monkeypatch: pytest.MonkeyPatch) -> Config:
         pg_passwd="test-secret",
         pg_database="testdb",
         pg_schema="public",
+        docroot=str(docroot),
     )
 
 
 @pytest.fixture
-def sample_pool(tmp_path) -> DBPool:
-    root = tmp_path / "docs"
-    root.mkdir()
+def sample_pool() -> DBPool:
     return DBPool(
         id=1,
         pool="test-pool",
-        rootpath=str(root) + "/",
         description="fixture pool",
     )
 
@@ -63,7 +63,7 @@ def mock_db_operations(test_config: Config, sample_pool: DBPool, monkeypatch: py
     ops.config = test_config
     ops.logger = test_config.logger
     ops.pool = sample_pool
-    ops.docroot = sample_pool.rootpath
+    ops.docroot = test_config.resolved_docroot()
     ops.engine = engine
     ops.Session = SessionFactory
     ops.metadata = sa.MetaData()

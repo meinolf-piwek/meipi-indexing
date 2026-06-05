@@ -1,27 +1,14 @@
 services:
-  postgres:
-    image: pgvector/pgvector:pg17
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: ${POSTGRES_DB:-postgres}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-postgres}"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
   tika:
     image: apache/tika:latest-full
     restart: unless-stopped
     command: ["-c", "/etc/tika/tika-config.xml"]
     volumes:
       - ./docker/tika-config.xml:/etc/tika/tika-config.xml:ro
+    networks:
+      - postgresql_default
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:9998/tika || exit 1"]
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:9998/tika || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -33,25 +20,26 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
       tika:
         condition: service_healthy
     environment:
-      IND_PG_HOST: postgres
-      IND_PG_PORT: "5432"
-      IND_PG_USER: ${POSTGRES_USER:-postgres}
-      IND_PG_PASSWD: ${POSTGRES_PASSWORD:-postgres}
-      IND_PG_DATABASE: ${POSTGRES_DB:-postgres}
+      IND_PG_HOST: ${IND_PG_HOST:-pg-db}
+      IND_PG_PORT: ${IND_PG_PORT:-5432}
+      IND_PG_USER: ${IND_PG_USER:-postgres}
+      IND_PG_PASSWD: ${IND_PG_PASSWD:-postgres}
+      IND_PG_DATABASE: ${IND_PG_DATABASE:-postgres}
       IND_PG_SCHEMA: ${IND_PG_SCHEMA:-meipi-indexing}
       IND_TIKA_NOOCR_URL: http://tika:9998
+      IND_DOCROOT: ${IND_DOCROOT:-/data}
       IND_WATCH_POOL_ID: ${IND_WATCH_POOL_ID:?Set IND_WATCH_POOL_ID in docker/.env}
-      IND_WATCH_POOL_ROOTPATH: ${IND_WATCH_POOL_ROOTPATH:-/data}
       IND_WATCH_PATH: ${IND_WATCH_PATH:-.}
       IND_WATCH_DEBOUNCE: ${IND_WATCH_DEBOUNCE:-1.0}
       IND_WATCH_NO_THUMBS: ${IND_WATCH_NO_THUMBS:-0}
     volumes:
-      - ${HOST_DATA_DIR:-./data}:${IND_WATCH_POOL_ROOTPATH:-/data}
+      - ${HOST_DATA_DIR:-./data}:${IND_DOCROOT:-/data}
+    networks:
+      - postgresql_default
 
-volumes:
-  postgres_data:
+networks:
+  postgresql_default:
+    external: true

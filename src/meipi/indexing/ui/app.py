@@ -41,7 +41,6 @@ def _list_pools() -> list[dict]:
                 "id": pool.id,
                 "name": pool.pool,
                 "description": pool.description or "",
-                "rootpath": pool.rootpath,
             }
             for pool in pools
         ]
@@ -105,6 +104,12 @@ def main() -> None:
                 "Set MEIPI_CONFIG_ENV before starting Streamlit to use another file. "
                 "Restart the app after changing configuration."
             ),
+        )
+        st.text_input(
+            "Document root (IND_DOCROOT)",
+            value=appconf.resolved_docroot(),
+            disabled=True,
+            help="Filesystem root for indexed file paths. Set IND_DOCROOT before starting the app.",
         )
         if st.button("Reload pools", use_container_width=True):
             _list_pools.clear()
@@ -185,7 +190,7 @@ Examples: `Vertrag`, `"Projektplan"`, `Rechnung -Entwurf`, `image/tiff`
         return
 
     for hit in hits:
-        _render_hit(hit, selected_pool["rootpath"])
+        _render_hit(hit, appconf.resolved_docroot())
 
 
 def launch() -> None:

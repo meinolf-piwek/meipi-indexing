@@ -11,9 +11,8 @@ from typing import Callable
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
-from . import appconf
 from .cmd.main import index_file
-from .config import Config
+from .config import Config, resolve_config
 from .operations import DBOperations
 
 
@@ -106,8 +105,9 @@ class PoolWatcher:
         watch_relpath: str = ".",
         debounce_seconds: float = 1.0,
         update_thumbs: bool = True,
-        config: Config = appconf,
+        config: Config | None = None,
     ) -> None:
+        config = resolve_config(config)
         self.dbop = dbop
         self.watch_relpath = watch_relpath
         self.debounce_seconds = debounce_seconds

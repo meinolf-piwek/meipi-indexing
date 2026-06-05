@@ -43,6 +43,7 @@ Wichtige Variablen:
 
 - `IND_PG_HOST`, `IND_PG_PORT`, `IND_PG_USER`, `IND_PG_DATABASE`
 - `IND_PG_API_KEY` (Keyring-Schluessel fuer das DB-Passwort)
+- `IND_DOCROOT` (Dateisystem-Root fuer indexierte Dateien)
 - `IND_DOCSUF`, `IND_PICSUF`, `IND_VIDSUF`
 - `IND_TIKA_NOOCR_URL`, `IND_TIKA_OCRURL`
 
@@ -50,7 +51,10 @@ Beispiel:
 
 ```bash
 export MEIPI_CONFIG_ENV=./config.env
+export IND_DOCROOT=/pfad/zu/dateien
 ```
+
+Alternativ pro Aufruf: `meipi-index --docroot /pfad/zu/dateien …` (Alias: `--rootpath`).
 
 Hinweis: Die globale Konfiguration wird beim Import geladen. Nach Aenderungen an
 Umgebungsvariablen oder `config.env` ist ein Prozess-Neustart noetig.

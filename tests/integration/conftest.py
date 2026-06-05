@@ -89,16 +89,17 @@ def db_ops(pg_engine, integration_config: Config, tmp_path):
     """Fresh schema and DBOperations bound to a persisted datapool row."""
     docroot = tmp_path / "files"
     docroot.mkdir()
-    rootpath = str(docroot) + os.sep
+    integration_config_with_root = integration_config.model_copy(
+        update={"docroot": str(docroot)}
+    )
 
     ops = DBOperations(
         pool=DBPool(
             id=0,
             pool="integration-pool",
-            rootpath=rootpath,
             description="integration test",
         ),
-        config=integration_config,
+        config=integration_config_with_root,
     )
     ops.engine.dispose()
     ops.engine = pg_engine
@@ -113,14 +114,12 @@ def db_ops(pg_engine, integration_config: Config, tmp_path):
         pool_row = DBPool(
             id=1,
             pool=pool_name,
-            rootpath=rootpath,
             description="integration test",
         )
         session.add(pool_row)
         session.commit()
         session.refresh(pool_row)
         ops.pool = pool_row
-        ops.docroot = pool_row.rootpath
 
     yield ops
 

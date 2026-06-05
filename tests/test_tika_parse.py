@@ -28,7 +28,7 @@ def async_file_ops(test_config: Config, sample_pool: DBPool) -> AsyncFileOperati
 @pytest.mark.asyncio
 async def test_tika_parse_without_dcterms_created(async_file_ops, sample_pool, monkeypatch):
     rel_path = "notes.txt"
-    (Path(sample_pool.rootpath) / rel_path).write_text("hello", encoding="utf-8")
+    (Path(async_file_ops.docroot) / rel_path).write_text("hello", encoding="utf-8")
 
     monkeypatch.setattr(
         async_file_ops.rmeta.as_text,
@@ -48,7 +48,7 @@ async def test_tika_parse_without_dcterms_created(async_file_ops, sample_pool, m
 @pytest.mark.asyncio
 async def test_tika_parse_with_string_dcterms_created(async_file_ops, sample_pool, monkeypatch):
     rel_path = "dated.txt"
-    (Path(sample_pool.rootpath) / rel_path).write_text("dated", encoding="utf-8")
+    (Path(async_file_ops.docroot) / rel_path).write_text("dated", encoding="utf-8")
     created = "2020-03-15T10:30:00"
 
     monkeypatch.setattr(
@@ -76,7 +76,7 @@ async def test_tika_parse_with_string_dcterms_created(async_file_ops, sample_poo
 @pytest.mark.asyncio
 async def test_tika_parse_with_list_dcterms_created(async_file_ops, sample_pool, monkeypatch):
     rel_path = "list-date.txt"
-    (Path(sample_pool.rootpath) / rel_path).write_text("x", encoding="utf-8")
+    (Path(async_file_ops.docroot) / rel_path).write_text("x", encoding="utf-8")
     created = "2019-01-02T08:00:00"
 
     monkeypatch.setattr(
@@ -104,7 +104,7 @@ async def test_tika_parse_with_list_dcterms_created(async_file_ops, sample_pool,
 @pytest.mark.asyncio
 async def test_tika_parse_bad_dcterms_falls_back_to_fdate(async_file_ops, sample_pool, monkeypatch):
     rel_path = "bad-date.txt"
-    (Path(sample_pool.rootpath) / rel_path).write_text("x", encoding="utf-8")
+    (Path(async_file_ops.docroot) / rel_path).write_text("x", encoding="utf-8")
 
     monkeypatch.setattr(
         async_file_ops.rmeta.as_text,
@@ -131,7 +131,7 @@ async def test_tika_parse_bad_dcterms_falls_back_to_fdate(async_file_ops, sample
 @pytest.mark.asyncio
 async def test_file_to_db_attaches_doc(async_file_ops, sample_pool, monkeypatch):
     rel_path = "a.txt"
-    (Path(sample_pool.rootpath) / rel_path).write_text("content", encoding="utf-8")
+    (Path(async_file_ops.docroot) / rel_path).write_text("content", encoding="utf-8")
 
     monkeypatch.setattr(
         async_file_ops.rmeta.as_text,

@@ -15,5 +15,4 @@ numpy>=2.2.6
 pillow>=11.3.0
 pillow-heif>=1.1.0
 imagehash>=4.3.2
-keyring>=25.6.0
 alembic>=1.18.4

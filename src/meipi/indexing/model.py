@@ -39,9 +39,11 @@ from sqlalchemy.orm import (
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, BYTEA, BIGINT
 from sqlalchemy.schema import Computed
 from pgvector.sqlalchemy import Vector
-from . import appconf
 
 _search_language = "german"
+
+# Shared ORM metadata: tables stay unqualified; PostgreSQL schema comes from search_path (pg_schema).
+orm_metadata = MetaData()
 
 
 # (filesystem path, pictures.id) — use with update_thumb_array; not filemeta.id
@@ -88,7 +90,7 @@ class PILArray(types.TypeDecorator):
 class Base(MappedAsDataclass, DeclarativeBase):
     """Base class for SQLAlchemy models."""
 
-    metadata = MetaData(appconf.pg_schema)
+    metadata = orm_metadata
 
     @classmethod
     def create_table(cls, session: Session) -> None:
@@ -152,9 +154,6 @@ class DBPool(Base):
     
     pool: Mapped[str] = mapped_column(
         nullable=False, unique=True, doc="Name of the data pool"
-    )
-    rootpath: Mapped[str] = mapped_column(
-        nullable=False, doc="Root path for the data pool, used to resolve file paths"
     )
     description: Mapped[Optional[str]] = mapped_column(
         nullable=True, doc="Optional description of the data pool"
@@ -380,3 +379,12 @@ class DBDinoV2Vector(Base, PicVectorMixin):
     @classmethod
     def _vector_size(cls) -> int:
         return 1024  # Größe des Vektors für DINO-Modelle
+
+
+def _unqualify_orm_tables() -> None:
+    """Keep table names unqualified so ``pg_schema`` can change via search_path."""
+    for mapper in Base.registry.mappers:
+        mapper.persist_selectable.schema = None
+
+
+_unqualify_orm_tables()

@@ -8,8 +8,7 @@ from itertools import batched
 import sqlalchemy as sa
 from tqdm.auto import tqdm
 
-from .. import appconf
-from ..config import Config
+from ..config import Config, resolve_config
 from ..model import DBMeta, DBPool
 from ..operations import AsyncFileOperations, DBOperations
 
@@ -20,14 +19,15 @@ async def index_file(
     pool: DBPool | None = None,
     rel_path: str,
     update_thumbs: bool = True,
-    config: Config = appconf,
+    config: Config | None = None,
 ) -> bool:
     """Index or re-index a single file in the database."""
+    config = resolve_config(config)
     if pool_id is not None:
-        dbop = DBOperations(pool_id=pool_id)
+        dbop = DBOperations(pool_id=pool_id, config=config)
         pool = dbop.pool
     elif pool is not None:
-        dbop = DBOperations(pool=pool)
+        dbop = DBOperations(pool=pool, config=config)
     else:
         raise ValueError("Either pool_id or pool must be provided")
 
@@ -59,24 +59,25 @@ async def read_files_bulk(
     batchsize: int = 500,
     incremental: bool = True,
     update_thumbs: bool = True,
-    config: Config = appconf,
+    config: Config | None = None,
 ) -> None:
     """Read files from the filesystem, extract metadata, and store them in the DB.
 
     Args:
         pool_id: Id of an existing datapool row (preferred for CLI usage).
         pool: In-memory pool object (e.g. for scripts/notebooks).
-        relpath: Path relative to the pool rootpath.
+        relpath: Path relative to ``IND_DOCROOT``.
         batchsize: Number of files processed per batch.
         incremental: Skip files whose path is already in filemeta for this pool.
         update_thumbs: Run thumbnail generation after ingest.
-        config: Application configuration.
+        config: Application configuration (defaults to ``appconf``).
     """
+    config = resolve_config(config)
     if pool_id is not None:
-        dbop = DBOperations(pool_id=pool_id)
+        dbop = DBOperations(pool_id=pool_id, config=config)
         pool = dbop.pool
     elif pool is not None:
-        dbop = DBOperations(pool=pool)
+        dbop = DBOperations(pool=pool, config=config)
     else:
         raise ValueError("Either pool_id or pool must be provided")
 

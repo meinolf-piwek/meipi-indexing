@@ -13,7 +13,7 @@ from .. import appconf
 from ..model import DBPool
 from ..operations import DBOperations
 from ..watcher import PoolWatcher
-from .main import index_file, read_files_bulk
+from .main import read_files_bulk
 
 
 def _db_ops(pool_id: int) -> DBOperations:
@@ -30,11 +30,20 @@ def _db_ops(pool_id: int) -> DBOperations:
         "(handled by the meipi-index entry point). Restart the process to apply changes."
     ),
 )
+@click.option(
+    "--docroot",
+    "--rootpath",
+    "docroot",
+    type=click.Path(exists=True, file_okay=False, path_type=str),
+    default=None,
+    help="Filesystem root for indexed files (overrides IND_DOCROOT).",
+)
 @click.pass_context
-def cli(ctx: click.Context, env_file: str | None) -> None:
+def cli(ctx: click.Context, env_file: str | None, docroot: str | None) -> None:
     """Index documents and images into PostgreSQL."""
     ctx.ensure_object(dict)
-    ctx.obj["config"] = appconf
+    if docroot is not None:
+        appconf.docroot = docroot
 
 
 @cli.command("schema-info")
@@ -73,25 +82,20 @@ def create_tables(ctx: click.Context, recreate: bool) -> None:
 
 @cli.command("create-pool")
 @click.option("--name", required=True, help="Unique pool name")
-@click.option(
-    "--rootpath",
-    required=True,
-    help="Filesystem root for files in this pool",
-)
 @click.option("--description", default=None, help="Optional description")
 @click.pass_context
 def create_pool(
     ctx: click.Context,
     name: str,
-    rootpath: str,
     description: str | None,
 ) -> None:
     """Register a new datapool."""
     dbop = DBOperations(allow_no_pool=True)
-    pool = DBPool(pool=name, rootpath=rootpath, description=description)
+    pool = DBPool(pool=name, description=description)
     created = dbop.create_pool(pool)
     click.echo(
-        f"Created pool id={created.id} name={created.pool!r} rootpath={created.rootpath!r}"
+        f"Created pool id={created.id} name={created.pool!r} "
+        f"(docroot={appconf.resolved_docroot()!r})"
     )
 
 
@@ -158,7 +162,6 @@ def read_files(
             batchsize=batch_size,
             incremental=not no_incremental,
             update_thumbs=not no_thumbs,
-            config=appconf,
         )
     )
 
@@ -289,7 +292,6 @@ def watch(
                 relpath=relpath,
                 incremental=True,
                 update_thumbs=not no_thumbs,
-                config=appconf,
             )
         )
 
@@ -298,7 +300,6 @@ def watch(
         watch_relpath=relpath,
         debounce_seconds=debounce,
         update_thumbs=not no_thumbs,
-        config=appconf,
     )
     click.echo(
         f"Watching {watcher.watch_abspath!r} for pool {pool_id} "
