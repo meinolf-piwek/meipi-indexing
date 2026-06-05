@@ -129,6 +129,34 @@ async def test_tika_parse_bad_dcterms_falls_back_to_fdate(async_file_ops, sample
 
 
 @pytest.mark.asyncio
+async def test_tika_parse_strips_leading_trailing_newlines(async_file_ops, monkeypatch):
+    rel_path = "padded.txt"
+    (Path(async_file_ops.docroot) / rel_path).write_text("line one\nline two", encoding="utf-8")
+
+    monkeypatch.setattr(
+        async_file_ops.rmeta.as_text,
+        "from_file",
+        AsyncMock(
+            return_value=[
+                _tika_response(
+                    {
+                        "Content-Type": "text/plain",
+                        "Content-Length": 17,
+                        TikaKey.Content: "\n\n\nline one\nline two\n\n",
+                    }
+                )
+            ]
+        ),
+    )
+
+    dbmeta, content = await async_file_ops.tika_parse(rel_path)
+
+    assert dbmeta is not None
+    assert content == "line one\nline two"
+    assert dbmeta.inhalt == "line one\nline two"
+
+
+@pytest.mark.asyncio
 async def test_file_to_db_attaches_doc(async_file_ops, sample_pool, monkeypatch):
     rel_path = "a.txt"
     (Path(async_file_ops.docroot) / rel_path).write_text("content", encoding="utf-8")
