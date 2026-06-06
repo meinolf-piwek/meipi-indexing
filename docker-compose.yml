@@ -1,3 +1,23 @@
+x-watcher: &watcher-base
+  build:
+    context: .
+    dockerfile: Dockerfile
+  restart: unless-stopped
+  depends_on:
+    tika:
+      condition: service_healthy
+  networks:
+    - postgresql_default
+  environment:
+      IND_PG_HOST: ${IND_PG_HOST:-pg-db}
+      IND_PG_PORT: ${IND_PG_PORT:-5432}
+      IND_PG_USER: ${IND_PG_USER:-postgres}
+      IND_PG_PASSWD: ${IND_PG_PASSWD:-postgres}
+      IND_PG_DATABASE: ${IND_PG_DATABASE:-postgres}
+      IND_PG_SCHEMA: ${IND_PG_SCHEMA:-meipi-indexing}
+      IND_TIKA_NOOCR_URL: http://tika:9998
+      IND_DOCROOT: /data
+
 services:
   tika:
     image: apache/tika:latest-full
@@ -16,31 +36,25 @@ services:
       retries: 10
       start_period: 30s
 
-  watcher:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    depends_on:
-      tika:
-        condition: service_healthy
+  watcher-1:
+    <<: *watcher-base
     environment:
-      IND_PG_HOST: ${IND_PG_HOST:-pg-db}
-      IND_PG_PORT: ${IND_PG_PORT:-5432}
-      IND_PG_USER: ${IND_PG_USER:-postgres}
-      IND_PG_PASSWD: ${IND_PG_PASSWD:-postgres}
-      IND_PG_DATABASE: ${IND_PG_DATABASE:-postgres}
-      IND_PG_SCHEMA: ${IND_PG_SCHEMA:-meipi-indexing}
-      IND_TIKA_NOOCR_URL: http://tika:9998
-      IND_DOCROOT: ${IND_DOCROOT:-/data}
-      IND_WATCH_POOL_ID: ${IND_WATCH_POOL_ID:?Set IND_WATCH_POOL_ID in docker/.env}
+      IND_WATCH_POOL_ID: ${IND_WATCH_POOL_ID:-1}
       IND_WATCH_PATH: ${IND_WATCH_PATH:-.}
       IND_WATCH_DEBOUNCE: ${IND_WATCH_DEBOUNCE:-1.0}
       IND_WATCH_NO_THUMBS: ${IND_WATCH_NO_THUMBS:-0}
     volumes:
-      - ${HOST_DATA_DIR:-./data}:${IND_DOCROOT:-/data}
-    networks:
-      - postgresql_default
+      - ${HOST_DATA_DIR:-./data}:/data
+
+  watcher-2:
+    <<: *watcher-base
+    environment:
+      IND_WATCH_POOL_ID: ${IND_WATCH_POOL_ID_2:-2}
+      IND_WATCH_PATH: ${IND_WATCH_PATH_2:-.}
+      IND_WATCH_DEBOUNCE: ${IND_WATCH_DEBOUNCE_2:-${IND_WATCH_DEBOUNCE:-1.0}}
+      IND_WATCH_NO_THUMBS: ${IND_WATCH_NO_THUMBS_2:-${IND_WATCH_NO_THUMBS:-0}}
+    volumes:
+      - ${HOST_DATA_DIR_2:-${HOST_DATA_DIR:-./data}}:/data
 
 networks:
   postgresql_default:
