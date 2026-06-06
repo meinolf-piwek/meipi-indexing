@@ -11,7 +11,7 @@ from sqlalchemy import select
 from meipi.indexing import appconf
 from meipi.indexing.model import DBPool
 from meipi.indexing.operations import DBOperations
-from meipi.indexing.search import DocSearchHit, QueryMode, search_documents
+from meipi.indexing.search import DocSearchHit, QueryMode, SortField, search_documents
 
 LANG_OPTIONS = {
     "German": "german",
@@ -23,6 +23,11 @@ MODE_OPTIONS: dict[str, QueryMode] = {
     "Web search (quotes, minus)": "websearch",
     "Plain (all words)": "plain",
     "Exact phrase": "phrase",
+}
+
+SORT_OPTIONS: dict[str, SortField] = {
+    "Date": "sort_date",
+    "Path": "path",
 }
 
 
@@ -52,6 +57,8 @@ def _run_search(
     lang: str,
     mode: QueryMode,
     limit: int,
+    sort_by: SortField,
+    sort_desc: bool,
 ) -> list[DocSearchHit]:
     if pool_id is None:
         raise ValueError("pool_id is required")
@@ -64,6 +71,8 @@ def _run_search(
             lang=lang,
             limit=limit,
             mode=mode,
+            sort_by=sort_by,
+            sort_desc=sort_desc,
         )
 
 
@@ -75,7 +84,7 @@ def _render_hit(hit: DocSearchHit, rootpath: str) -> None:
             st.markdown(f"**{hit.fname}** `{hit.suffix}`")
             st.caption(full_path)
         with cols[1]:
-            st.metric("Rank", f"{hit.rank:.3f}")
+            st.metric("Date", hit.sort_date.strftime("%Y-%m-%d %H:%M"))
         if hit.snippet.strip():
             st.markdown(hit.snippet, unsafe_allow_html=True)
         else:
@@ -141,6 +150,8 @@ def main() -> None:
         st.header("Search options")
         lang_label = st.selectbox("Language", options=list(LANG_OPTIONS.keys()))
         mode_label = st.selectbox("Query mode", options=list(MODE_OPTIONS.keys()))
+        sort_label = st.selectbox("Sort by", options=list(SORT_OPTIONS.keys()))
+        sort_desc = st.toggle("Descending", value=True)
         limit = st.slider("Max results", min_value=5, max_value=200, value=25, step=5)
 
         with st.expander("Query syntax help"):
@@ -176,10 +187,11 @@ Examples: `Vertrag`, `"Projektplan"`, `Rechnung -Entwurf`, `image/tiff`
 
     lang = LANG_OPTIONS[lang_label]
     mode = MODE_OPTIONS[mode_label]
+    sort_by = SORT_OPTIONS[sort_label]
 
     with st.spinner("Searching…"):
         try:
-            hits = _run_search(pool_id, query, lang, mode, limit)
+            hits = _run_search(pool_id, query, lang, mode, limit, sort_by, sort_desc)
         except Exception as exc:
             st.error(f"Search failed: {exc}")
             return

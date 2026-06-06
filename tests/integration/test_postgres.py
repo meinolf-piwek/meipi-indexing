@@ -187,7 +187,7 @@ def test_dbdoc_fulltext_roundtrip(db_ops):
     assert hits[0].id == meta_id
 
 
-def test_search_documents_ranked_hits(db_ops):
+def test_search_documents_returns_sort_date(db_ops):
     from meipi.indexing.search import search_documents
 
     now = datetime(2024, 3, 1, 8, 0, 0)
@@ -223,7 +223,7 @@ def test_search_documents_ranked_hits(db_ops):
 
     assert len(hits) == 1
     assert hits[0].fname == "report.txt"
-    assert hits[0].rank > 0
+    assert hits[0].sort_date == now
     assert "Vertrag" in hits[0].snippet or "vertrag" in hits[0].snippet.lower()
 
 
@@ -262,3 +262,66 @@ def test_search_documents_matches_metadata_only(db_ops):
 
     assert len(hits) == 1
     assert hits[0].fname == "scan.tiff"
+
+
+def test_search_documents_sort_by_date_and_path(db_ops):
+    from meipi.indexing.search import search_documents
+
+    older = datetime(2024, 1, 1, 8, 0, 0)
+    newer = datetime(2024, 6, 1, 8, 0, 0)
+    with db_ops.Session() as session:
+        for path, fname, sort_date in (
+            ("b/report.txt", "report-b.txt", newer),
+            ("a/note.txt", "note-a.txt", older),
+            ("c/memo.txt", "memo-c.txt", older),
+        ):
+            meta = DBMeta(
+                pool_id=db_ops.pool.id,
+                path=path,
+                fname=fname,
+                suffix=".txt",
+                sort_date=sort_date,
+                fdate=sort_date,
+                fsize=20,
+                clength=20,
+                ctype="text/plain",
+                ftype="doc",
+                md_keys=[],
+                meta_data={},
+                sha256=bytes([sort_date.day]) * 32,
+            )
+            meta.inhalt = "Gemeinsamer Vertragstext."
+            meta.doc = DBDoc()
+            session.add(meta)
+        session.commit()
+
+    with db_ops.Session() as session:
+        by_date_desc = search_documents(
+            session,
+            pool_id=db_ops.pool.id,
+            query="Vertrag",
+            lang="german",
+            mode="plain",
+            sort_by="sort_date",
+            sort_desc=True,
+        )
+        by_path_asc = search_documents(
+            session,
+            pool_id=db_ops.pool.id,
+            query="Vertrag",
+            lang="german",
+            mode="plain",
+            sort_by="path",
+            sort_desc=False,
+        )
+
+    assert [hit.fname for hit in by_date_desc] == [
+        "report-b.txt",
+        "note-a.txt",
+        "memo-c.txt",
+    ]
+    assert [hit.path for hit in by_path_asc] == [
+        "a/note.txt",
+        "b/report.txt",
+        "c/memo.txt",
+    ]
