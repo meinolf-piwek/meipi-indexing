@@ -209,6 +209,60 @@ def test_ensure_tables_creates_only_missing(sample_pool, test_config, monkeypatc
     }
 
 
+def test_sync_report_is_in_sync() -> None:
+    from meipi.indexing.watcher import SyncReport
+
+    in_sync = SyncReport(
+        schema="public",
+        pool_id=1,
+        docroot="/data",
+        watch_relpath=".",
+        schema_tables={"filemeta": 1},
+        tables_missing=(),
+        filemeta_rows=1,
+        pool_indexed_count=1,
+        fs_count=1,
+        watch_indexed_count=1,
+        in_sync=("a.txt",),
+        only_on_disk=(),
+        only_in_db=(),
+    )
+    out_of_sync = SyncReport(
+        schema="public",
+        pool_id=1,
+        docroot="/data",
+        watch_relpath=".",
+        schema_tables={"filemeta": 1},
+        tables_missing=(),
+        filemeta_rows=1,
+        pool_indexed_count=1,
+        fs_count=2,
+        watch_indexed_count=1,
+        in_sync=(),
+        only_on_disk=("new.txt",),
+        only_in_db=(),
+    )
+    mismatch = SyncReport(
+        schema="public",
+        pool_id=1,
+        docroot="/data",
+        watch_relpath="wrong",
+        schema_tables={"filemeta": 100},
+        tables_missing=(),
+        filemeta_rows=100,
+        pool_indexed_count=50,
+        fs_count=0,
+        watch_indexed_count=0,
+        in_sync=(),
+        only_on_disk=(),
+        only_in_db=(),
+    )
+
+    assert in_sync.is_in_sync is True
+    assert out_of_sync.is_in_sync is False
+    assert mismatch.is_in_sync is False
+
+
 def test_format_sync_report_summary() -> None:
     from meipi.indexing.watcher import SyncReport, format_sync_report
 

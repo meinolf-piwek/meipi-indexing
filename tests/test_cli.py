@@ -72,6 +72,128 @@ def test_check_sync_invokes_check_pool_sync(monkeypatch):
     assert "filemeta: 1 rows in schema" in result.output
 
 
+def test_check_sync_exits_nonzero_when_out_of_sync(monkeypatch):
+    from meipi.indexing.watcher import SyncReport
+
+    report = SyncReport(
+        schema="public",
+        pool_id=1,
+        docroot="/data",
+        watch_relpath=".",
+        schema_tables={"filemeta": 1},
+        tables_missing=(),
+        filemeta_rows=1,
+        pool_indexed_count=1,
+        fs_count=2,
+        watch_indexed_count=1,
+        in_sync=(),
+        only_on_disk=("new.txt",),
+        only_in_db=(),
+    )
+    monkeypatch.setattr(
+        "meipi.indexing.cmd.cli.check_pool_sync",
+        lambda dbop, *, watch_relpath: report,
+    )
+    monkeypatch.setattr(
+        "meipi.indexing.cmd.cli.DBOperations",
+        lambda pool_id: object(),
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["check-sync", "--pool-id", "1", "."])
+    assert result.exit_code == 1
+    assert "Differences found" in result.output
+
+
+def test_watch_exits_when_out_of_sync(monkeypatch):
+    from meipi.indexing.watcher import SyncReport
+
+    report = SyncReport(
+        schema="public",
+        pool_id=1,
+        docroot="/data",
+        watch_relpath=".",
+        schema_tables={"filemeta": 1},
+        tables_missing=(),
+        filemeta_rows=1,
+        pool_indexed_count=1,
+        fs_count=1,
+        watch_indexed_count=0,
+        in_sync=(),
+        only_on_disk=(),
+        only_in_db=("stale.txt",),
+    )
+    run_called: list[bool] = []
+
+    class FakeWatcher:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def run(self, **kwargs):
+            run_called.append(True)
+
+    monkeypatch.setattr("meipi.indexing.cmd.cli.PoolWatcher", FakeWatcher)
+    monkeypatch.setattr(
+        "meipi.indexing.cmd.cli.check_pool_sync",
+        lambda dbop, *, watch_relpath: report,
+    )
+    monkeypatch.setattr(
+        "meipi.indexing.cmd.cli.DBOperations",
+        lambda pool_id: object(),
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["watch", "--pool-id", "1", "."])
+    assert result.exit_code == 1
+    assert "Watcher not started" in result.output
+    assert run_called == []
+
+
+def test_watch_starts_when_in_sync(monkeypatch):
+    from meipi.indexing.watcher import SyncReport
+
+    report = SyncReport(
+        schema="public",
+        pool_id=1,
+        docroot="/data",
+        watch_relpath=".",
+        schema_tables={"filemeta": 1},
+        tables_missing=(),
+        filemeta_rows=1,
+        pool_indexed_count=1,
+        fs_count=1,
+        watch_indexed_count=1,
+        in_sync=("a.txt",),
+        only_on_disk=(),
+        only_in_db=(),
+    )
+    run_called: list[bool] = []
+
+    class FakeWatcher:
+        watch_abspath = "/data"
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def run(self, **kwargs):
+            run_called.append(True)
+
+    monkeypatch.setattr("meipi.indexing.cmd.cli.PoolWatcher", FakeWatcher)
+    monkeypatch.setattr(
+        "meipi.indexing.cmd.cli.check_pool_sync",
+        lambda dbop, *, watch_relpath: report,
+    )
+    monkeypatch.setattr(
+        "meipi.indexing.cmd.cli.DBOperations",
+        lambda pool_id: object(),
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["watch", "--pool-id", "1", "."])
+    assert result.exit_code == 0
+    assert run_called == [True]
+
+
 def test_check_sync_verbose_lists_paths(monkeypatch):
     from meipi.indexing.watcher import SyncReport
 
@@ -102,7 +224,7 @@ def test_check_sync_verbose_lists_paths(monkeypatch):
 
     runner = CliRunner()
     result = runner.invoke(cli, ["check-sync", "--pool-id", "1", "-v"])
-    assert result.exit_code == 0
+    assert result.exit_code == 1
     assert "  - new.txt" in result.output
     assert "filemeta" in result.output
 

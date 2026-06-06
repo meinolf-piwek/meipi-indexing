@@ -124,6 +124,11 @@ class SyncReport:
         return bool(self.tables_missing or self.only_in_db or self.only_on_disk)
 
     @property
+    def is_in_sync(self) -> bool:
+        """True when the watch tree matches the database and required tables exist."""
+        return not self.has_differences and not self.watch_path_mismatch
+
+    @property
     def watch_path_mismatch(self) -> bool:
         """True when the watch path overlaps neither disk files nor indexed paths."""
         return (
@@ -352,6 +357,13 @@ class PoolWatcher:
         report: SyncReport | None = None
         if startup_check:
             report = self.check_at_startup()
+            if not report.is_in_sync:
+                self.logger.error(
+                    "Pool %s out of sync at %r; watcher not started",
+                    self.dbop.pool.id,
+                    self.watch_relpath,
+                )
+                return report
         watch_path = Path(self.watch_abspath)
         if not watch_path.is_dir():
             raise ValueError(f"Watch path is not a directory: {watch_path}")

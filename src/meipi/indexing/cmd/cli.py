@@ -12,7 +12,7 @@ import click
 from .. import appconf
 from ..model import DBPool
 from ..operations import DBOperations
-from ..watcher import PoolWatcher, check_pool_sync, format_sync_report
+from ..watcher import PoolWatcher, SyncReport, check_pool_sync, format_sync_report
 from .main import read_files_bulk
 
 
@@ -26,12 +26,13 @@ def _print_sync_check(
     *,
     as_json: bool,
     verbose: bool,
-) -> None:
+) -> SyncReport:
     report = check_pool_sync(dbop, watch_relpath=relpath)
     if as_json:
         click.echo(json.dumps(report.as_dict(verbose=verbose), indent=2))
     else:
         click.echo(format_sync_report(report, verbose=verbose))
+    return report
 
 
 @click.group()
@@ -294,7 +295,9 @@ def check_sync(
     RELPATH is relative to IND_DOCROOT (or --docroot), e.g. ``docs`` or ``.``.
     Absolute paths under docroot are accepted; existence is checked against docroot, not cwd.
     """
-    _print_sync_check(_db_ops(pool_id), relpath, as_json=as_json, verbose=verbose)
+    report = _print_sync_check(_db_ops(pool_id), relpath, as_json=as_json, verbose=verbose)
+    if not report.is_in_sync:
+        raise click.exceptions.Exit(1)
 
 
 @cli.command("watch")
@@ -361,7 +364,10 @@ def watch(
     )
     if not no_startup_check:
         click.echo(f"Startup check for pool {pool_id} at {relpath!r}...")
-        _print_sync_check(dbop, relpath, as_json=check_json, verbose=verbose)
+        report = _print_sync_check(dbop, relpath, as_json=check_json, verbose=verbose)
+        if not report.is_in_sync:
+            click.echo("Watcher not started: pool is out of sync.", err=True)
+            raise click.exceptions.Exit(1)
     click.echo(
         f"Watching {watcher.watch_abspath!r} for pool {pool_id} "
         f"(Ctrl+C to stop)..."

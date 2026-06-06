@@ -145,3 +145,37 @@ def test_watcher_watch_abspath(sample_pool, test_config, tmp_path) -> None:
     dbop = MagicMock(docroot=str(docroot), pool=sample_pool)
     watcher = PoolWatcher(dbop, watch_relpath="subdir")
     assert watcher.watch_abspath.endswith("/subdir")
+
+
+def test_watcher_run_aborts_when_out_of_sync(sample_pool, test_config, tmp_path) -> None:
+    from meipi.indexing.watcher import SyncReport
+
+    docroot = tmp_path / "pool"
+    docroot.mkdir()
+    dbop = MagicMock(docroot=str(docroot), pool=sample_pool)
+    report = SyncReport(
+        schema="public",
+        pool_id=sample_pool.id,
+        docroot=str(docroot),
+        watch_relpath=".",
+        schema_tables={"filemeta": 0},
+        tables_missing=(),
+        filemeta_rows=0,
+        pool_indexed_count=0,
+        fs_count=1,
+        watch_indexed_count=0,
+        in_sync=(),
+        only_on_disk=("a.txt",),
+        only_in_db=(),
+    )
+    dbop.pool = sample_pool
+
+    class FakeWatcher(PoolWatcher):
+        def check_at_startup(self):
+            return report
+
+    watcher = FakeWatcher(dbop, watch_relpath=".")
+    result = watcher.run(block=False, startup_check=True)
+
+    assert result is report
+    assert watcher._observer is None
