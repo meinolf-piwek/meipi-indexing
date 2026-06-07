@@ -8,7 +8,7 @@ from itertools import batched
 import sqlalchemy as sa
 from tqdm.auto import tqdm
 
-from ..config import Config, resolve_config
+from ..config import Config, FTYPE, resolve_config
 from ..model import DBMeta, DBPool
 from ..operations import AsyncFileOperations, DBOperations
 
@@ -48,8 +48,11 @@ async def index_file(
             session.flush()
             session.commit()
 
-    if update_thumbs and dbmeta.ftype == "pic" and dbmeta.pic is not None:
-        dbop.update_thumb_for_pic(dbmeta.pic.id, rel_path)
+    if update_thumbs:
+        if dbmeta.ftype == FTYPE.DOC:
+            dbop.update_thumb_for_doc(dbmeta.id, rel_path)
+        elif dbmeta.ftype == FTYPE.PIC and dbmeta.pic is not None:
+            dbop.update_thumb_for_pic(dbmeta.pic.id, rel_path)
     return True
 
 
@@ -116,3 +119,5 @@ async def read_files_bulk(
         print("Updating thumbs")
         dbop.update_thumbs_no_heic()
         dbop.update_thumbs_no_thumb()
+        dbop.update_thumbs_doc()
+        dbop.update_phashes()

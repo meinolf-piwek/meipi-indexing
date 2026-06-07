@@ -7,6 +7,7 @@ from datetime import datetime
 from collections.abc import Sequence
 from typing import Literal
 
+import numpy as np
 import sqlalchemy as sa
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
@@ -28,6 +29,7 @@ class DocSearchHit:
     suffix: str
     sort_date: datetime
     snippet: str
+    thumbarray: np.ndarray | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -195,6 +197,7 @@ def search_documents(
             DBMeta.fname,
             DBMeta.suffix,
             DBMeta.sort_date,
+            DBMeta.thumbarray,
             snippet,
         )
         .where(*where)
@@ -210,6 +213,7 @@ def search_documents(
             suffix=row.suffix,
             sort_date=row.sort_date,
             snippet=row.snippet or "",
+            thumbarray=row.thumbarray,
         )
         for row in session.execute(stmt)
     ]

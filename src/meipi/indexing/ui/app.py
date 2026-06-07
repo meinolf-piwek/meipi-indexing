@@ -102,16 +102,21 @@ def _run_search(
 def _render_hit(hit: DocSearchHit, rootpath: str) -> None:
     full_path = os.path.join(rootpath, hit.path) if rootpath else hit.path
     with st.container(border=True):
-        cols = st.columns([4, 1])
+        cols = st.columns([1, 4, 1])
         with cols[0]:
+            if hit.thumbarray is not None:
+                st.image(hit.thumbarray, use_container_width=True)
+            else:
+                st.caption("No preview")
+        with cols[1]:
             st.markdown(f"**{hit.fname}** `{hit.suffix}`")
             st.caption(full_path)
-        with cols[1]:
+            if hit.snippet.strip():
+                st.markdown(hit.snippet, unsafe_allow_html=True)
+            else:
+                st.info("No snippet available for this match.")
+        with cols[2]:
             st.metric("Date", hit.sort_date.strftime("%Y-%m-%d %H:%M"))
-        if hit.snippet.strip():
-            st.markdown(hit.snippet, unsafe_allow_html=True)
-        else:
-            st.info("No snippet available for this match.")
 
 
 def main() -> None:

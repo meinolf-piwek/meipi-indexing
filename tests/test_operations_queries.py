@@ -51,10 +51,10 @@ def test_python_and_must_not_be_used_for_pic_filters():
 
 def test_update_thumbs_no_thumb_stmt_filters_by_pool():
     stmt = (
-        sa.select(DBPic.id, DBMeta.path)
-        .join(DBPic.meta)
+        sa.select(DBMeta.id, DBMeta.path)
+        .join(DBMeta.pic)
         .where(DBMeta.pool_id == 5)
-        .where(DBPic.thumbarray.is_(None))
+        .where(DBMeta.thumbarray.is_(None))
     )
     sql = compile_postgres(stmt).lower()
     assert "filemeta.pool_id" in sql
@@ -64,10 +64,10 @@ def test_update_thumbs_no_thumb_stmt_filters_by_pool():
 
 def test_update_thumbs_no_heic_stmt_excludes_heic():
     stmt = (
-        sa.select(DBPic.id, DBMeta.path)
-        .join(DBPic.meta)
+        sa.select(DBMeta.id, DBMeta.path)
+        .join(DBMeta.pic)
         .where(DBMeta.pool_id == 5)
-        .where(DBPic.thumbarray.is_(None))
+        .where(DBMeta.thumbarray.is_(None))
         .where(DBMeta.suffix.not_in([".HEIC", ".heic"]))
     )
     sql = compile_postgres(stmt).lower()

@@ -25,7 +25,7 @@ from libxmp import utils as xmpu
 import sqlalchemy as sa
 from sqlalchemy.orm import sessionmaker, Session
 from .model import Base as ModelBase, DBMeta, DBPic, DBDoc, DBDinoV2Vector, DBVid, IdList, DBPool
-from .config import Config, resolve_config
+from .config import Config, FTYPE, resolve_config
 
 WATCHER_TABLES: tuple[type[ModelBase], ...] = (
     DBPool,
@@ -243,13 +243,13 @@ class DBOperations():
                 
 
     def update_thumbs_no_heic(self)->List[int]:
-        """Update the thumbnails and perceptual hashes for the pictures in the pool that are not HEICs."""
+        """Update missing thumbnails for pictures in the pool that are not HEICs."""
         with self.Session() as session:
             stmt = (
-                sa.select(DBPic.id, DBMeta.path)
-                .join(DBPic.meta)
+                sa.select(DBMeta.id, DBMeta.path)
+                .join(DBMeta.pic)
                 .where(DBMeta.pool_id == self.pool.id)
-                .where(DBPic.thumbarray.is_(None))
+                .where(DBMeta.thumbarray.is_(None))
                 .where(DBMeta.suffix.not_in([".HEIC", ".heic"]))
             )
         
@@ -266,13 +266,13 @@ class DBOperations():
         
 
     def update_thumbs_no_thumb(self)-> List[int]:
-        """Update the thumbnails and perceptual hashes for the pictures in the pool that have no thumbnail."""
+        """Update missing thumbnails for pictures in the pool."""
         with self.Session() as session:
             stmt = (
-                sa.select(DBPic.id, DBMeta.path)
-                .join(DBPic.meta)
+                sa.select(DBMeta.id, DBMeta.path)
+                .join(DBMeta.pic)
                 .where(DBMeta.pool_id == self.pool.id)
-                .where(DBPic.thumbarray.is_(None))
+                .where(DBMeta.thumbarray.is_(None))
             )
             piclist = [
                 (os.path.join(self.docroot, row.path), row.id)
@@ -286,21 +286,44 @@ class DBOperations():
 
 
     def update_thumbs(self, thumblist: List[Tuple[np.ndarray, int]]):
-        """Update the thumbnails and perceptual hashes for the given list of pictures."""
+        """Update thumbnails on filemeta rows. *id* is ``filemeta.id``."""
         with self.Session() as session:
-            for thumb, id in thumblist:
-                pic = session.get(DBPic, id)
-                if pic is None:
-                    self.logger.warning("No DBPic row for id %s", id)
+            for thumb, meta_id in thumblist:
+                meta = session.get(DBMeta, meta_id)
+                if meta is None:
+                    self.logger.warning("No DBMeta row for id %s", meta_id)
                     continue
-                pic.thumbarray = thumb
-                pic.set_phash()
+                meta.thumbarray = thumb
+                meta.set_phash()
             session.flush()
             session.commit()
+
+    def update_phashes(self) -> int:
+        """Compute missing perceptual hashes for rows that already have thumbnails."""
+        with self.Session() as session:
+            metas = session.scalars(
+                sa.select(DBMeta)
+                .where(DBMeta.pool_id == self.pool.id)
+                .where(DBMeta.thumbarray.is_not(None))
+                .where(DBMeta.phash.is_(None))
+            ).all()
+            for meta in metas:
+                meta.set_phash()
+            count = len(metas)
+            session.flush()
+            session.commit()
+        return count
 
     def update_thumb_for_pic(self, pic_id: int, rel_path: str) -> bool:
         """Generate a thumbnail for one picture row using PIL."""
         from .thumbnail import make_thumbnail_array
+
+        with self.Session() as session:
+            pic = session.get(DBPic, pic_id)
+            if pic is None:
+                self.logger.warning("No DBPic row for id %s", pic_id)
+                return False
+            meta_id = pic.meta_id
 
         full_path = os.path.join(self.docroot, rel_path)
         try:
@@ -313,8 +336,44 @@ class DBOperations():
                 exc,
             )
             return False
-        self.update_thumbs([(thumb, pic_id)])
+        self.update_thumbs([(thumb, meta_id)])
         return True
+
+    def update_thumb_for_doc(self, meta_id: int, rel_path: str) -> bool:
+        """Generate a thumbnail for one document row."""
+        from .document_thumbnail import make_document_thumbnail
+
+        full_path = os.path.join(self.docroot, rel_path)
+        try:
+            thumb = make_document_thumbnail(full_path)
+        except Exception as exc:
+            self.logger.warning(
+                "Document thumbnail generation failed for %s (meta id %s): %s",
+                rel_path,
+                meta_id,
+                exc,
+            )
+            return False
+        self.update_thumbs([(thumb, meta_id)])
+        return True
+
+    def update_thumbs_doc(self) -> List[int]:
+        """Update thumbnails for documents in the pool that have no thumbnail."""
+        with self.Session() as session:
+            rows = list(
+                session.execute(
+                    sa.select(DBMeta.id, DBMeta.path)
+                    .where(DBMeta.pool_id == self.pool.id)
+                    .where(DBMeta.ftype == FTYPE.DOC)
+                    .where(DBMeta.thumbarray.is_(None))
+                )
+            )
+
+        failed: list[int] = []
+        for row in rows:
+            if not self.update_thumb_for_doc(row.id, row.path):
+                failed.append(row.id)
+        return failed
 
     def update_thumb_for_path(self, rel_path: str) -> bool:
         """Generate a missing thumbnail for one indexed picture path."""
@@ -325,7 +384,7 @@ class DBOperations():
                 .where(
                     DBMeta.pool_id == self.pool.id,
                     DBMeta.path == rel_path,
-                    DBPic.thumbarray.is_(None),
+                    DBMeta.thumbarray.is_(None),
                 )
             )
             pic_id = session.scalars(stmt).first()

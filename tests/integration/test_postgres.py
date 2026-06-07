@@ -48,7 +48,7 @@ def _paths_without_thumb(db_ops) -> set[str]:
         sa.select(DBPic.id, DBMeta.path)
         .join(DBPic.meta)
         .where(DBMeta.pool_id == db_ops.pool.id)
-        .where(DBPic.thumbarray.is_(None))
+        .where(DBMeta.thumbarray.is_(None))
     )
     with db_ops.Session() as session:
         return {
@@ -62,7 +62,7 @@ def _paths_without_thumb_no_heic(db_ops) -> set[str]:
         sa.select(DBPic.id, DBMeta.path)
         .join(DBPic.meta)
         .where(DBMeta.pool_id == db_ops.pool.id)
-        .where(DBPic.thumbarray.is_(None))
+        .where(DBMeta.thumbarray.is_(None))
         .where(DBMeta.suffix.not_in([".HEIC", ".heic"]))
     )
     with db_ops.Session() as session:
@@ -88,17 +88,17 @@ def test_thumb_queries_filter_by_pool_and_heic(db_ops):
 
 
 def test_update_thumbs_persists_numpy_thumbnail_and_phash(db_ops):
-    _, pic = seed_pic_meta(db_ops, path="thumb.jpg", suffix=".jpg")
+    meta, pic = seed_pic_meta(db_ops, path="thumb.jpg", suffix=".jpg")
     thumb = np.arange(48, dtype=np.uint8).reshape(4, 4, 3)
 
-    db_ops.update_thumbs([(thumb, pic.id)])
+    db_ops.update_thumbs([(thumb, meta.id)])
 
     with db_ops.Session() as session:
-        stored = session.get(DBPic, pic.id)
-        assert stored is not None
-        assert stored.thumbarray is not None
-        np.testing.assert_array_equal(stored.thumbarray, thumb)
-        assert stored.phash is not None
+        stored_meta = session.get(DBMeta, meta.id)
+        assert stored_meta is not None
+        assert stored_meta.thumbarray is not None
+        np.testing.assert_array_equal(stored_meta.thumbarray, thumb)
+        assert stored_meta.phash is not None
 
 
 def test_insert_pics_from_meta_selects_only_missing_pics(db_ops, tmp_path, monkeypatch):

@@ -201,12 +201,12 @@ class DALIImageResizer:
         in der Eingabeliste.
 
         Args:
-            piclist (IdList): (Dateipfad, ``pictures.id``) — nicht ``filemeta.id``
+            piclist (IdList): (Dateipfad, ``filemeta.id``)
             batch_size (int): Anzahl der Bilder, die in einem Batch verarbeitet werden sollen
             use_PIL (bool): Ob die Thumbnails mit PIL erstellt werden sollen (True) oder mit DALI (False)
 
         Returns:
-            ``(thumbnails, pic_ids, failed_paths, failed_pic_ids)``.
+            ``(thumbnails, meta_ids, failed_paths, failed_meta_ids)``.
         """
         # Durchgang 1: DALI und große Batchgröße
         batches = batched(piclist, batch_size)

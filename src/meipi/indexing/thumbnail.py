@@ -12,6 +12,18 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 THUMB_SIZE = 224
 
 
+def pad_image_to_square(image: Image.Image, size: int = THUMB_SIZE) -> np.ndarray:
+    """Center *image* on a square RGB canvas without resizing."""
+    rgb = image.convert("RGB")
+    width, height = rgb.size
+    padded = Image.new("RGB", (size, size))
+    padded.paste(
+        rgb,
+        ((size - width) // 2, (size - height) // 2),
+    )
+    return np.asarray(padded)
+
+
 def thumbnail_from_image(image: Image.Image, size: int = THUMB_SIZE) -> np.ndarray:
     """Fit *image* into a square RGB thumbnail as a numpy array."""
     rgb = image.convert("RGB")
@@ -20,12 +32,7 @@ def thumbnail_from_image(image: Image.Image, size: int = THUMB_SIZE) -> np.ndarr
     new_width = max(1, round(width * scale))
     new_height = max(1, round(height * scale))
     resized = rgb.resize((new_width, new_height), Image.Resampling.LANCZOS)
-    padded = Image.new("RGB", (size, size))
-    padded.paste(
-        resized,
-        ((size - new_width) // 2, (size - new_height) // 2),
-    )
-    return np.asarray(padded)
+    return pad_image_to_square(resized, size)
 
 
 def make_thumbnail_array(filepath: str, size: int = THUMB_SIZE) -> np.ndarray:

@@ -151,12 +151,12 @@ def seed_pic_meta(
             meta_data={},
             sha256=b"\xab" * 32,
         )
-        thumbarray = np.zeros((4, 4, 3), dtype=np.uint8) if with_thumb else None
+        meta.thumbarray = (
+            np.zeros((4, 4, 3), dtype=np.uint8) if with_thumb else None
+        )
         meta.pic = DBPic(
             xmp={},
             truncated=False,
-            thumbarray=thumbarray,
-            phash=None,
         )
         session.add(meta)
         session.commit()

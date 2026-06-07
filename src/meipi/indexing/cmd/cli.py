@@ -218,8 +218,10 @@ def update_thumbs(
     else:
         failed.extend(dbop.update_thumbs_no_heic())
         failed.extend(dbop.update_thumbs_no_thumb())
+        failed.extend(dbop.update_thumbs_doc())
+    dbop.update_phashes()
     if failed:
-        click.echo(f"Failed picture ids: {failed}")
+        click.echo(f"Failed filemeta ids: {failed}")
     else:
         click.echo("All thumbnails updated successfully.")
 

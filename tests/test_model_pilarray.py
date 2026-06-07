@@ -3,7 +3,7 @@
 import numpy as np
 from PIL import Image
 
-from meipi.indexing.model import DBPic, PILArray
+from meipi.indexing.model import DBMeta, PILArray
 
 
 def test_pilarray_roundtrip():
@@ -26,8 +26,8 @@ def test_pilarray_none_roundtrip():
 
 def test_calc_phash_stable_for_identical_images():
     image = Image.new("RGB", (64, 64), color=(10, 20, 30))
-    h1 = DBPic.calc_phash(image)
-    h2 = DBPic.calc_phash(image)
+    h1 = DBMeta.calc_phash(image)
+    h2 = DBMeta.calc_phash(image)
     assert h1 == h2
     assert isinstance(h1, bytes)
     assert len(h1) > 0

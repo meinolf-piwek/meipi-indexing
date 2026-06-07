@@ -46,7 +46,7 @@ _search_language = "german"
 orm_metadata = MetaData()
 
 
-# (filesystem path, pictures.id) — use with update_thumb_array; not filemeta.id
+# (filesystem path, filemeta.id)
 type IdList = Sequence[Tuple[str, int]]
 
 class PILArray(types.TypeDecorator):
@@ -170,7 +170,10 @@ class DBMeta(Base):
         Index("ix_filemeta_sha256", "sha256"),
         Index("ix_filemeta_path", "pool_id", "path", unique=True),
         Index("ix_filemeta_ts_content", "ts_content", postgresql_using="gin"),
+        Index("ix_filemeta_phash", "phash"),
     )
+    _phash_size = 8
+    _phash_high_freq = 2
 
     id: Mapped[int] = mapped_column(
         primary_key=True, autoincrement=True, sort_order=0, init=False
@@ -208,6 +211,12 @@ class DBMeta(Base):
     sha256: Mapped[Optional[bytes]] = mapped_column(
         BYTEA, nullable=True, default=None, doc="FileHash"
     )
+    thumbarray: Mapped[Optional[np.ndarray]] = mapped_column(
+        PILArray, nullable=True, default=None, doc="Thumbnail 224x224x3 as ndarray"
+    )
+    phash: Mapped[Optional[bytes]] = mapped_column(
+        BYTEA, default=None, doc="Perceptual hash of the thumbnail as bytes"
+    )
     inhalt: Mapped[str] = mapped_column(
         TEXT,
         default="",
@@ -229,6 +238,21 @@ class DBMeta(Base):
                                     cascade = "all, delete-orphan", passive_deletes=True, default= None)
     vid: Mapped[Optional["DBVid"]] = relationship(back_populates="meta",
                                     cascade = "all, delete-orphan", passive_deletes=True, default= None)
+
+    @property
+    def thumb(self) -> Image.Image | None:
+        if self.thumbarray is not None:
+            return Image.fromarray(self.thumbarray)
+        return None
+
+    def set_phash(self) -> None:
+        if self.thumbarray is not None:
+            self.phash = self.calc_phash(Image.fromarray(self.thumbarray))
+
+    @classmethod
+    def calc_phash(cls, im: Image.Image) -> bytes:
+        h = phash(im, cls._phash_size, cls._phash_high_freq)
+        return bytes.fromhex(str(h))
 
     @classmethod
     def tsquery(
@@ -262,19 +286,11 @@ class DBDoc(Base):
 
 class DBPic(Base):
     """SQLAlchemy model for Picture data stored in PostgreSQL.
-    
-    Es enthält neben den Datei-Metadaten Felder für XMP-Metadaten, 
-    ein Thumbnail als numpy array und einen Perceptual Hash.
-    Die eigentlichen Bilddaten werden nicht in der Datenbank gespeichert, sondern nur die Metadaten und der Hash.
-    Die Methode set_phash berechnet den Perceptual Hash basierend auf dem Thumbnail, falls dieses vorhanden ist. 
-    Der Perceptual Hash wird als BYTEA gespeichert, um eine effiziente Speicherung und Suche zu ermöglichen. 
-    Es wird ein Index auf dem phash-Feld erstellt, um schnelle Ähnlichkeitssuchen zu ermöglichen.
+
+    Enthält XMP-Metadaten. Thumbnail und Perceptual Hash liegen auf :class:`DBMeta`.
     """
 
     __tablename__ = "pictures"
-    __table_args__ = (Index("ix_pictures_phash", "phash"),)
-    _phash_size = 8
-    _phash_high_freq = 2
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True, sort_order=0, init=False)
     # Fremdschlüssel auf die Tabelle der Dateimetadaten
@@ -287,29 +303,6 @@ class DBPic(Base):
     truncated: Mapped[Optional[bool]] = mapped_column(
         default=None, doc="Whether original image is truncated"
     )
-    thumbarray: Mapped[Optional[np.ndarray]] = mapped_column(
-        PILArray, nullable=True, default=None, doc="Thumbnail 224x224x3 as ndarray"
-    )
-    phash: Mapped[Optional[bytes]] = mapped_column(
-        BYTEA, default=None, doc="Perceptual hash as bytes"
-    )
-    
-    def set_phash(self):
-        if self.thumbarray is not None:
-            thumb_image = Image.fromarray(self.thumbarray)
-            self.phash = self.calc_phash(thumb_image)
-
-    @property
-    def thumb(self)-> Image.Image | None:
-        if self.thumbarray is not None:
-            return Image.fromarray(self.thumbarray)
-        else:
-            return None
-
-    @classmethod
-    def calc_phash(cls, im: Image.Image) -> bytes:
-        h = phash(im, cls._phash_size, cls._phash_high_freq)
-        return bytes.fromhex(str(h))
 
 
 class DBVid(Base):

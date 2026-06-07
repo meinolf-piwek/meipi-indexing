@@ -19,6 +19,7 @@ def test_search_documents_empty_query_applies_filters_only(mock_db_operations):
             suffix=".txt",
             sort_date=now,
             snippet="",
+            thumbarray=None,
         )
     ]
 

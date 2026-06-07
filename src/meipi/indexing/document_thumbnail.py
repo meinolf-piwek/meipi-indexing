@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import textwrap
+import zipfile
 from html.parser import HTMLParser
 from pathlib import Path
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from .thumbnail import THUMB_SIZE, thumbnail_from_image
+from .thumbnail import THUMB_SIZE, pad_image_to_square
 
 _TEXT_SUFFIXES = {".txt", ".md", ".csv"}
 _HTML_SUFFIXES = {".html", ".htm"}
+_OFFICE_ZIP_SUFFIXES = {".docx", ".xlsx", ".pptx", ".odt"}
 _TEXT_PREVIEW_CHARS = 600
 _TEXT_LINE_WIDTH = 28
 _TEXT_MAX_LINES = 10
@@ -37,10 +39,10 @@ def _load_font(size: int = 14) -> ImageFont.ImageFont:
         "/usr/share/fonts/TTF/DejaVuSans.ttf",
     ):
         try:
-            return ImageFont.truetype(path, size=size)
+            return ImageFont.truetype(path, size=size) # type: ignore[return-value]
         except OSError:
             continue
-    return ImageFont.load_default()
+    return ImageFont.load_default() # type: ignore[return-value]
 
 
 def _wrap_preview_text(text: str) -> list[str]:
@@ -74,6 +76,25 @@ def _thumbnail_from_text(
             break
 
     return np.asarray(image)
+
+
+def _thumbnail_empty(size: int = THUMB_SIZE) -> np.ndarray:
+    return _thumbnail_placeholder("empty", size=size)
+
+
+def _thumbnail_encrypted(size: int = THUMB_SIZE) -> np.ndarray:
+    return _thumbnail_placeholder("encrypted", size=size)
+
+
+def _is_file_encrypted(filepath: str, suffix: str) -> bool:
+    if suffix == ".pdf":
+        import pymupdf
+
+        with pymupdf.open(filepath) as document:
+            return bool(document.needs_pass)
+    if suffix in _OFFICE_ZIP_SUFFIXES:
+        return not zipfile.is_zipfile(filepath)
+    return False
 
 
 def _thumbnail_placeholder(
@@ -122,6 +143,8 @@ def _thumbnail_from_pdf(filepath: str, size: int = THUMB_SIZE) -> np.ndarray:
     import pymupdf
 
     with pymupdf.open(filepath) as document:
+        if document.needs_pass:
+            return _thumbnail_encrypted(size)
         if document.page_count == 0:
             return _thumbnail_placeholder(
                 Path(filepath).suffix.upper() or ".PDF",
@@ -129,9 +152,18 @@ def _thumbnail_from_pdf(filepath: str, size: int = THUMB_SIZE) -> np.ndarray:
                 size=size,
             )
         page = document.load_page(0)
-        pixmap = page.get_pixmap(matrix=pymupdf.Matrix(2, 2), alpha=False)
+        page_rect = page.rect
+        longest = max(page_rect.width, page_rect.height)
+        if longest <= 0:
+            return _thumbnail_placeholder(
+                Path(filepath).suffix.upper() or ".PDF",
+                subtitle=Path(filepath).name,
+                size=size,
+            )
+        scale = size / longest
+        pixmap = page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), alpha=False)
         image = Image.frombytes("RGB", (pixmap.width, pixmap.height), pixmap.samples)
-    return thumbnail_from_image(image, size)
+    return pad_image_to_square(image, size)
 
 
 def make_document_thumbnail(filepath: str, size: int = THUMB_SIZE) -> np.ndarray:
@@ -141,7 +173,12 @@ def make_document_thumbnail(filepath: str, size: int = THUMB_SIZE) -> np.ndarray
     document suffixes fall back to a simple labeled placeholder image.
     """
     path = Path(filepath)
+    if path.stat().st_size == 0:
+        return _thumbnail_empty(size)
+
     suffix = path.suffix.lower()
+    if _is_file_encrypted(filepath, suffix):
+        return _thumbnail_encrypted(size)
 
     if suffix == ".pdf":
         return _thumbnail_from_pdf(filepath, size)

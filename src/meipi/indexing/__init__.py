@@ -18,7 +18,7 @@ __version__ = "0.0.1"
 
 from .config import CONFIG_PATH, Config, FTYPE
 
-appconf: Config = Config(_env_file=CONFIG_PATH, config_path=CONFIG_PATH)
+appconf: Config = Config()
 
 from .operations import DBOperations, AsyncFileOperations
 from .model import DBMeta, DBDoc, DBPic, Base, DBDinoV2Vector, DBPool, DBCatalog

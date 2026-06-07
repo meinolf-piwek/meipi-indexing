@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-from meipi.indexing.model import DBPic
+from meipi.indexing.model import DBMeta, DBPic
 from meipi.indexing.operations import DBOperations
 
 
@@ -31,14 +31,14 @@ def test_db_operations_allow_no_pool(monkeypatch):
 def test_update_thumbs_updates_rows(mock_db_operations):
     ops, session = mock_db_operations
     thumb = np.zeros((4, 4, 3), dtype=np.uint8)
-    pic = MagicMock()
-    session.get.return_value = pic
+    meta = MagicMock()
+    session.get.return_value = meta
 
     ops.update_thumbs([(thumb, 10)])
 
-    session.get.assert_called_once_with(DBPic, 10)
-    assert pic.thumbarray is thumb
-    pic.set_phash.assert_called_once()
+    session.get.assert_called_once_with(DBMeta, 10)
+    assert meta.thumbarray is thumb
+    meta.set_phash.assert_called_once()
     session.flush.assert_called_once()
     session.commit.assert_called_once()
 
@@ -83,3 +83,38 @@ def test_update_thumbs_no_thumb_queries_and_delegates(mock_resizer_cls, mock_db_
         use_PIL=True,
     )
     assert result == []
+
+
+@patch("meipi.indexing.document_thumbnail.make_document_thumbnail")
+def test_update_thumbs_doc_generates_missing_doc_thumbs(
+    mock_make_document_thumbnail, mock_db_operations
+):
+    ops, session = mock_db_operations
+    thumb = np.zeros((224, 224, 3), dtype=np.uint8)
+    mock_make_document_thumbnail.return_value = thumb
+    session.execute.return_value = [
+        SimpleNamespace(id=11, path="docs/a.txt"),
+        SimpleNamespace(id=12, path="docs/b.pdf"),
+    ]
+
+    with patch.object(ops, "update_thumbs") as mock_update_thumbs:
+        failed = ops.update_thumbs_doc()
+
+    assert failed == []
+    assert mock_make_document_thumbnail.call_count == 2
+    assert mock_update_thumbs.call_count == 2
+    mock_update_thumbs.assert_any_call([(thumb, 11)])
+    mock_update_thumbs.assert_any_call([(thumb, 12)])
+
+
+def test_update_phashes_computes_missing_hashes(mock_db_operations):
+    ops, session = mock_db_operations
+    meta = MagicMock()
+    session.scalars.return_value.all.return_value = [meta]
+
+    count = ops.update_phashes()
+
+    assert count == 1
+    meta.set_phash.assert_called_once()
+    session.flush.assert_called_once()
+    session.commit.assert_called_once()

@@ -10,6 +10,44 @@ from meipi.indexing.document_thumbnail import make_document_thumbnail
 from meipi.indexing.thumbnail import THUMB_SIZE
 
 
+def test_make_document_thumbnail_encrypted_pdf(tmp_path):
+    path = tmp_path / "secret.pdf"
+    document = pymupdf.open()
+    page = document.new_page()
+    page.insert_text((72, 72), "secret")
+    document.save(
+        path,
+        encryption=pymupdf.PDF_ENCRYPT_AES_256,
+        owner_pw="owner",
+        user_pw="user",
+    )
+    document.close()
+
+    thumb = make_document_thumbnail(str(path))
+
+    assert thumb.shape == (THUMB_SIZE, THUMB_SIZE, 3)
+    assert thumb.dtype == np.uint8
+
+
+def test_make_document_thumbnail_encrypted_docx(tmp_path):
+    path = tmp_path / "secret.docx"
+    path.write_bytes(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 128)
+
+    thumb = make_document_thumbnail(str(path))
+
+    assert thumb.shape == (THUMB_SIZE, THUMB_SIZE, 3)
+    assert thumb.dtype == np.uint8
+
+
+def test_make_document_thumbnail_empty_file(tmp_path):
+    for name in ("empty.txt", "empty.pdf", "empty.docx"):
+        path = tmp_path / name
+        path.write_bytes(b"")
+        thumb = make_document_thumbnail(str(path))
+        assert thumb.shape == (THUMB_SIZE, THUMB_SIZE, 3)
+        assert thumb.dtype == np.uint8
+
+
 def test_make_document_thumbnail_from_txt(tmp_path):
     path = tmp_path / "note.txt"
     path.write_text("Vertrag\nProjektplan\nRechnung", encoding="utf-8")
@@ -34,7 +72,7 @@ def test_make_document_thumbnail_from_html(tmp_path):
 def test_make_document_thumbnail_from_pdf(tmp_path):
     path = tmp_path / "sample.pdf"
     document = pymupdf.open()
-    page = document.new_page()
+    page = document.new_page(width=400, height=200)
     page.insert_text((72, 72), "PDF preview")
     document.save(path)
     document.close()
@@ -44,6 +82,9 @@ def test_make_document_thumbnail_from_pdf(tmp_path):
     assert thumb.shape == (THUMB_SIZE, THUMB_SIZE, 3)
     assert thumb.dtype == np.uint8
     assert thumb.std() > 0
+    # Wide page: content spans full width; only top/bottom are padded.
+    assert thumb[0, :, :].std() == 0
+    assert thumb[-1, :, :].std() == 0
 
 
 def test_make_document_thumbnail_placeholder_for_docx(tmp_path):
