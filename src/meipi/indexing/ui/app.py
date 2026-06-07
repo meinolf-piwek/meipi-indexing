@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime, time
 
-import sqlalchemy as sa
 import streamlit as st
 from sqlalchemy import select
 
 from meipi.indexing import appconf
-from meipi.indexing.model import DBPool
+from meipi.indexing.model import DBMeta, DBPool
 from meipi.indexing.operations import DBOperations
-from meipi.indexing.search import DocSearchHit, QueryMode, SortField, search_documents
+from meipi.indexing.search import DocSearchHit, DocSearchResult, QueryMode, SortField, search_documents
 
 LANG_OPTIONS = {
     "German": "german",
@@ -29,7 +29,6 @@ SORT_OPTIONS: dict[str, SortField] = {
     "Date": "sort_date",
     "Path": "path",
 }
-
 
 @st.cache_resource
 def _db_for_pool(pool_id: int) -> DBOperations:
@@ -51,6 +50,20 @@ def _list_pools() -> list[dict]:
         ]
 
 
+@st.cache_data(ttl=30)
+def _list_suffixes(pool_id: int) -> list[str]:
+    ops = _db_for_pool(pool_id)
+    with ops.Session() as session:
+        return list(
+            session.scalars(
+                select(DBMeta.suffix)
+                .where(DBMeta.pool_id == pool_id)
+                .distinct()
+                .order_by(DBMeta.suffix)
+            )
+        )
+
+
 def _run_search(
     pool_id: int|None,
     query: str,
@@ -59,7 +72,12 @@ def _run_search(
     limit: int,
     sort_by: SortField,
     sort_desc: bool,
-) -> list[DocSearchHit]:
+    sort_date_from: datetime | None,
+    sort_date_to: datetime | None,
+    suffixes: list[str],
+    path_prefix: str | None,
+    include_metadata: bool,
+) -> DocSearchResult:
     if pool_id is None:
         raise ValueError("pool_id is required")
     ops = _db_for_pool(pool_id)
@@ -73,6 +91,11 @@ def _run_search(
             mode=mode,
             sort_by=sort_by,
             sort_desc=sort_desc,
+            sort_date_from=sort_date_from,
+            sort_date_to=sort_date_to,
+            suffixes=suffixes or None,
+            path_prefix=path_prefix,
+            include_metadata=include_metadata,
         )
 
 
@@ -107,7 +130,7 @@ def main() -> None:
         st.header("Connection")
         st.text_input(
             "Config env file (loaded at startup)",
-            value=appconf.envfile,
+            value=appconf.config_path,
             disabled=True,
             help=(
                 "Set MEIPI_CONFIG_ENV before starting Streamlit to use another file. "
@@ -122,6 +145,7 @@ def main() -> None:
         )
         if st.button("Reload pools", use_container_width=True):
             _list_pools.clear()
+            _list_suffixes.clear()
             _db_for_pool.clear()
 
         try:
@@ -150,9 +174,47 @@ def main() -> None:
         st.header("Search options")
         lang_label = st.selectbox("Language", options=list(LANG_OPTIONS.keys()))
         mode_label = st.selectbox("Query mode", options=list(MODE_OPTIONS.keys()))
+        include_metadata = st.toggle(
+            "Include metadata in search",
+            value=True,
+            help="Also match filename, path, content type, and Tika metadata fields.",
+        )
         sort_label = st.selectbox("Sort by", options=list(SORT_OPTIONS.keys()))
         sort_desc = st.toggle("Descending", value=True)
-        limit = st.slider("Max results", min_value=5, max_value=200, value=25, step=5)
+        limit = st.number_input(
+            "Max results shown",
+            min_value=1,
+            value=25,
+            step=5,
+            help="All matching documents are counted; only this many are displayed.",
+        )
+
+        st.divider()
+        st.header("Filters")
+        use_date_filter = st.toggle("Filter by date range", value=False)
+        sort_date_from = None
+        sort_date_to = None
+        if use_date_filter:
+            date_cols = st.columns(2)
+            with date_cols[0]:
+                from_date = st.date_input("From", value=None)
+            with date_cols[1]:
+                to_date = st.date_input("To", value=None)
+            if from_date is not None:
+                sort_date_from = datetime.combine(from_date, time.min)
+            if to_date is not None:
+                sort_date_to = datetime.combine(to_date, time.max)
+
+        selected_suffixes = st.multiselect(
+            "Suffix",
+            options=_list_suffixes(pool_id),
+            help="Leave empty to include all suffixes. Multiple values allowed.",
+        )
+        path_prefix = st.text_input(
+            "Path starts with",
+            placeholder="e.g. archive/2024/",
+            help="Relative path prefix within the indexed document root.",
+        )
 
         with st.expander("Query syntax help"):
             st.markdown(
@@ -164,7 +226,10 @@ exclusion (`budget -draft`), and OR.
 
 **Exact phrase**: words must appear adjacent and in order.
 
-Searches **extracted text** and **metadata** (Tika JSON, filename, path).
+With metadata enabled, searches **extracted text** and **metadata**
+(Tika JSON, filename, path).
+
+Leave the query empty to list all documents matching the filters.
 
 Examples: `Vertrag`, `"Projektplan"`, `Rechnung -Entwurf`, `image/tiff`
                 """
@@ -177,31 +242,44 @@ Examples: `Vertrag`, `"Projektplan"`, `Rechnung -Entwurf`, `image/tiff`
     )
     search_clicked = st.button("Search", type="primary", use_container_width=False)
 
-    if not search_clicked and not query:
-        st.info("Enter a query and click Search.")
-        return
-
-    if not query.strip():
-        st.warning("Query is empty.")
+    if not search_clicked:
+        st.info("Enter a query or set filters, then click Search.")
         return
 
     lang = LANG_OPTIONS[lang_label]
     mode = MODE_OPTIONS[mode_label]
     sort_by = SORT_OPTIONS[sort_label]
-
     with st.spinner("Searching…"):
         try:
-            hits = _run_search(pool_id, query, lang, mode, limit, sort_by, sort_desc)
+            result = _run_search(
+                pool_id,
+                query,
+                lang,
+                mode,
+                limit,
+                sort_by,
+                sort_desc,
+                sort_date_from,
+                sort_date_to,
+                selected_suffixes,
+                path_prefix,
+                include_metadata,
+            )
         except Exception as exc:
             st.error(f"Search failed: {exc}")
             return
 
-    st.subheader(f"{len(hits)} result{'s' if len(hits) != 1 else ''}")
-    if not hits:
-        st.warning("No documents matched your query.")
+    shown = len(result.hits)
+    total = result.total_count
+    if shown < total:
+        st.subheader(f"Showing {shown} of {total} results")
+    else:
+        st.subheader(f"{total} result{'s' if total != 1 else ''}")
+    if total == 0:
+        st.warning("No documents matched your search or filters.")
         return
 
-    for hit in hits:
+    for hit in result.hits:
         _render_hit(hit, appconf.resolved_docroot())
 
 

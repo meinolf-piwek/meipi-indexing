@@ -213,7 +213,7 @@ def test_search_documents_returns_sort_date(db_ops):
         session.commit()
 
     with db_ops.Session() as session:
-        hits = search_documents(
+        result = search_documents(
             session,
             pool_id=db_ops.pool.id,
             query="Vertrag",
@@ -221,10 +221,11 @@ def test_search_documents_returns_sort_date(db_ops):
             mode="plain",
         )
 
-    assert len(hits) == 1
-    assert hits[0].fname == "report.txt"
-    assert hits[0].sort_date == now
-    assert "Vertrag" in hits[0].snippet or "vertrag" in hits[0].snippet.lower()
+    assert result.total_count == 1
+    assert len(result.hits) == 1
+    assert result.hits[0].fname == "report.txt"
+    assert result.hits[0].sort_date == now
+    assert "Vertrag" in result.hits[0].snippet or "vertrag" in result.hits[0].snippet.lower()
 
 
 def test_search_documents_matches_metadata_only(db_ops):
@@ -252,7 +253,7 @@ def test_search_documents_matches_metadata_only(db_ops):
         session.commit()
 
     with db_ops.Session() as session:
-        hits = search_documents(
+        result = search_documents(
             session,
             pool_id=db_ops.pool.id,
             query="Vertragsentwurf",
@@ -260,8 +261,105 @@ def test_search_documents_matches_metadata_only(db_ops):
             mode="plain",
         )
 
-    assert len(hits) == 1
-    assert hits[0].fname == "scan.tiff"
+    assert result.total_count == 1
+    assert result.hits[0].fname == "scan.tiff"
+
+
+def test_search_documents_metadata_optional(db_ops):
+    from meipi.indexing.search import search_documents
+
+    now = datetime(2024, 3, 1, 8, 0, 0)
+    with db_ops.Session() as session:
+        meta = DBMeta(
+            pool_id=db_ops.pool.id,
+            path="scan.tiff",
+            fname="scan.tiff",
+            suffix=".tiff",
+            sort_date=now,
+            fdate=now,
+            fsize=10,
+            clength=10,
+            ctype="image/tiff",
+            ftype="pic",
+            md_keys=["title"],
+            meta_data={"title": "Vertragsentwurf Sommer 2024"},
+            sha256=b"\xce" * 32,
+            inhalt="",
+        )
+        session.add(meta)
+        session.commit()
+
+    with db_ops.Session() as session:
+        with_metadata = search_documents(
+            session,
+            pool_id=db_ops.pool.id,
+            query="Vertragsentwurf",
+            lang="german",
+            mode="plain",
+            include_metadata=True,
+        )
+        content_only = search_documents(
+            session,
+            pool_id=db_ops.pool.id,
+            query="Vertragsentwurf",
+            lang="german",
+            mode="plain",
+            include_metadata=False,
+        )
+
+    assert with_metadata.total_count == 1
+    assert content_only.total_count == 0
+
+
+def test_search_documents_empty_query_uses_filters(db_ops):
+    from meipi.indexing.search import search_documents
+
+    early = datetime(2024, 1, 1, 8, 0, 0)
+    late = datetime(2024, 6, 1, 8, 0, 0)
+    with db_ops.Session() as session:
+        for path, fname, sort_date in (
+            ("docs/a.txt", "a.txt", early),
+            ("docs/b.txt", "b.txt", late),
+            ("pics/c.tiff", "c.tiff", late),
+        ):
+            meta = DBMeta(
+                pool_id=db_ops.pool.id,
+                path=path,
+                fname=fname,
+                suffix=path[path.rfind(".") :],
+                sort_date=sort_date,
+                fdate=sort_date,
+                fsize=20,
+                clength=20,
+                ctype="text/plain",
+                ftype="doc" if fname.endswith(".txt") else "pic",
+                md_keys=[],
+                meta_data={},
+                sha256=bytes([sort_date.month]) * 32,
+            )
+            if fname.endswith(".txt"):
+                meta.inhalt = "Beliebiger Inhalt."
+                meta.doc = DBDoc()
+            session.add(meta)
+        session.commit()
+
+    with db_ops.Session() as session:
+        all_docs = search_documents(
+            session,
+            pool_id=db_ops.pool.id,
+            query="",
+        )
+        docs_only = search_documents(
+            session,
+            pool_id=db_ops.pool.id,
+            query="   ",
+            path_prefix="docs/",
+            suffixes=[".txt"],
+        )
+
+    assert all_docs.total_count == 3
+    assert docs_only.total_count == 2
+    assert {hit.fname for hit in docs_only.hits} == {"a.txt", "b.txt"}
 
 
 def test_search_documents_sort_by_date_and_path(db_ops):
@@ -315,13 +413,83 @@ def test_search_documents_sort_by_date_and_path(db_ops):
             sort_desc=False,
         )
 
-    assert [hit.fname for hit in by_date_desc] == [
+    assert by_date_desc.total_count == 3
+    assert [hit.fname for hit in by_date_desc.hits] == [
         "report-b.txt",
         "note-a.txt",
         "memo-c.txt",
     ]
-    assert [hit.path for hit in by_path_asc] == [
+    assert [hit.path for hit in by_path_asc.hits] == [
         "a/note.txt",
         "b/report.txt",
         "c/memo.txt",
     ]
+
+
+def test_search_documents_filters_and_total_count(db_ops):
+    from meipi.indexing.search import search_documents
+
+    early = datetime(2024, 1, 1, 8, 0, 0)
+    mid = datetime(2024, 3, 1, 8, 0, 0)
+    late = datetime(2024, 6, 1, 8, 0, 0)
+    with db_ops.Session() as session:
+        for path, fname, sort_date, ftype in (
+            ("docs/a.txt", "a.txt", early, "doc"),
+            ("docs/b.txt", "b.txt", mid, "doc"),
+            ("pics/c.tiff", "c.tiff", late, "pic"),
+        ):
+            meta = DBMeta(
+                pool_id=db_ops.pool.id,
+                path=path,
+                fname=fname,
+                suffix=path[path.rfind(".") :],
+                sort_date=sort_date,
+                fdate=sort_date,
+                fsize=20,
+                clength=20,
+                ctype="text/plain",
+                ftype=ftype,
+                md_keys=[],
+                meta_data={},
+                sha256=bytes([sort_date.month]) * 32,
+            )
+            meta.inhalt = "Gemeinsamer Vertragstext."
+            if ftype == "doc":
+                meta.doc = DBDoc()
+            session.add(meta)
+        session.commit()
+
+    with db_ops.Session() as session:
+        limited = search_documents(
+            session,
+            pool_id=db_ops.pool.id,
+            query="Vertrag",
+            lang="german",
+            mode="plain",
+            limit=1,
+        )
+        by_prefix = search_documents(
+            session,
+            pool_id=db_ops.pool.id,
+            query="Vertrag",
+            lang="german",
+            mode="plain",
+            path_prefix="docs/",
+            suffixes=[".txt"],
+        )
+        by_date = search_documents(
+            session,
+            pool_id=db_ops.pool.id,
+            query="Vertrag",
+            lang="german",
+            mode="plain",
+            sort_date_from=datetime(2024, 2, 1),
+            sort_date_to=datetime(2024, 4, 1),
+        )
+
+    assert limited.total_count == 3
+    assert len(limited.hits) == 1
+    assert by_prefix.total_count == 2
+    assert {hit.fname for hit in by_prefix.hits} == {"a.txt", "b.txt"}
+    assert by_date.total_count == 1
+    assert by_date.hits[0].fname == "b.txt"

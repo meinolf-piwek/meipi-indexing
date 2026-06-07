@@ -8,7 +8,6 @@ Create Date: 2026-05-29
 
 from __future__ import annotations
 
-import os
 from typing import Sequence, Union
 
 from alembic import op
@@ -30,10 +29,9 @@ def _schema() -> str:
     src = Path(__file__).resolve().parents[2] / "src"
     if str(src) not in sys.path:
         sys.path.insert(0, str(src))
-    from meipi.indexing.config import Config
+    from meipi.indexing.config import CONFIG_PATH, Config
 
-    env_file = os.environ.get("MEIPI_CONFIG_ENV", "config.env")
-    return Config.load(env_file).pg_schema
+    return Config(_env_file=CONFIG_PATH, config_path=CONFIG_PATH).pg_schema
 
 
 def upgrade() -> None:

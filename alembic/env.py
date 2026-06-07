@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import sys
 from logging.config import fileConfig
 from pathlib import Path
@@ -16,7 +15,7 @@ _SRC = Path(__file__).resolve().parents[1] / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from meipi.indexing.config import Config  # noqa: E402
+from meipi.indexing.config import CONFIG_PATH, Config  # noqa: E402
 from meipi.indexing.model import Base  # noqa: E402
 
 config = context.config
@@ -27,15 +26,16 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 
+def _config() -> Config:
+    return Config(_env_file=CONFIG_PATH, config_path=CONFIG_PATH)
+
+
 def _schema() -> str:
-    env_file = os.environ.get("MEIPI_CONFIG_ENV", "config.env")
-    return Config.load(env_file).pg_schema
+    return _config().pg_schema
 
 
 def _database_url() -> URL:
-    env_file = os.environ.get("MEIPI_CONFIG_ENV", "config.env")
-    appconf = Config.load(env_file)
-    return appconf.db_conn_URL
+    return _config().db_conn_URL
 
 
 def run_migrations_offline() -> None:

@@ -1,16 +1,40 @@
 """Tests for document full-text search."""
 
-from meipi.indexing.search import search_documents
+from datetime import datetime
+from types import SimpleNamespace
+
+from meipi.indexing.search import DocSearchResult, _normalize_suffixes, search_documents
 from helpers import POSTGRES_DIALECT
 
 
-def test_search_documents_empty_query(mock_db_operations):
+def test_search_documents_empty_query_applies_filters_only(mock_db_operations):
     ops, session = mock_db_operations
+    now = datetime(2024, 3, 1, 8, 0, 0)
+    session.scalar.return_value = 1
+    session.execute.return_value = [
+        SimpleNamespace(
+            meta_id=7,
+            path="docs/a.txt",
+            fname="a.txt",
+            suffix=".txt",
+            sort_date=now,
+            snippet="",
+        )
+    ]
 
-    hits = search_documents(session, pool_id=ops.pool.id, query="   ")
+    result = search_documents(
+        session,
+        pool_id=ops.pool.id,
+        query="   ",
+        suffixes=[".txt"],
+        path_prefix="docs/",
+    )
 
-    assert hits == []
-    session.execute.assert_not_called()
+    assert result.total_count == 1
+    assert len(result.hits) == 1
+    assert result.hits[0].fname == "a.txt"
+    session.scalar.assert_called_once()
+    session.execute.assert_called_once()
 
 
 def test_search_sql_includes_metadata_tsvector(mock_db_operations):
@@ -39,3 +63,9 @@ def test_search_sql_includes_metadata_tsvector(mock_db_operations):
     assert "@@" in sql
     assert "to_tsvector" in sql
     assert "meta_data" in sql
+
+
+def test_normalize_suffixes_accepts_dotted_and_plain_values():
+    assert _normalize_suffixes([".PDF", "txt", " .md "]) == [".pdf", ".txt", ".md"]
+    assert _normalize_suffixes([]) == []
+    assert _normalize_suffixes(None) == []

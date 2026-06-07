@@ -4,10 +4,11 @@ Neben der hier definierten default-Konfiguration,
 können die Werte auch über eine .env-Datei oder direkt über Umgebungsvariablen überschrieben werden.
 Die .env-Datei sollte im Root-Verzeichnis der App liegen und den Namen "config.env" tragen.
 
-Die globale Instanz ``appconf`` wird einmal beim Import von ``meipi.indexing`` erzeugt. Felder können
-zur Laufzeit gesetzt werden (z. B. ``--docroot`` in der CLI) oder per ``reload_appconf()`` aus
-``config.env`` / ``MEIPI_CONFIG_ENV`` neu geladen werden. Bestehende ``DBOperations``-Instanzen
-behalten danach ihre alte Engine (``search_path``) — neu anlegen nach einem Reload.
+Die globale Instanz ``appconf`` wird einmal beim Import von ``meipi.indexing`` erzeugt.
+``CONFIG_PATH`` (``MEIPI_CONFIG_ENV`` oder ``config.env``) wird dabei einmalig festgelegt.
+Einzelne Felder können zur Laufzeit gesetzt werden (z. B. ``--docroot`` in der CLI).
+Änderungen an der Env-Datei auf dem Datenträger oder an ``MEIPI_CONFIG_ENV`` erfordern einen
+Prozess-Neustart.
 
 Beispiel für eine ``.env-Datei``::
 
@@ -73,6 +74,9 @@ class FTYPE():
     UNK:str = "unk"
 
 
+CONFIG_PATH = os.environ.get("MEIPI_CONFIG_ENV", "config.env")
+
+
 class Config(BaseSettings):
     """Enthält die Konfiguration der App
 
@@ -80,9 +84,12 @@ class Config(BaseSettings):
     Das PostgreSQL-Schema wird über ``pg_schema`` (``search_path``) gesteuert, nicht über qualifizierte
     Tabellennamen in den ORM-``Table``-Objekten.
     """
-    envfile: str = Field(default="config.env", description="Path used when this config was loaded")
+    config_path: str = Field(
+        default=CONFIG_PATH,
+        description="Path to the env file used when this config was loaded",
+    )
     model_config = SettingsConfigDict(
-        env_file="config.env",
+        env_file=CONFIG_PATH,
         env_file_encoding="utf-8",
         env_prefix="IND_",
         case_sensitive=False,
@@ -101,7 +108,7 @@ class Config(BaseSettings):
         description="Filesystem root; file paths in the DB are relative to this directory",
     )
     docsuf: Set[str] = Field(default={".pdf",".txt",".md",".docx",".doc",
-        ".html",".htm",".epub",".odt",})
+        ".html",".htm",".epub",".odt", ".xlsx", ".xls", ".csv"})
     picsuf: Set[str] = Field(default={".jpg", ".jpeg", ".bmp", ".png", ".heic", ".tiff", ".tif"})
     vidsuf: Set[str] = Field(default={".mov", ".vob", ".mkv", ".avi", ".mp4", ".mcf"})
     logger_name: str = "sqlalchemy.engine"
@@ -121,11 +128,6 @@ class Config(BaseSettings):
     def resolved_docroot(self) -> str:
         """Absolute path to the configured filesystem root."""
         return os.path.abspath(self.docroot)
-
-    @classmethod
-    def load(cls, envfile: str = "config.env") -> "Config":
-        """Load settings from *envfile* (env vars still override file values)."""
-        return cls(_env_file=envfile, envfile=envfile)
 
     def db_passwd_from_keyring(self) -> str:
         """DB password from SecretService keyring when D-Bus is available, else ``pg_passwd``."""
@@ -185,23 +187,6 @@ def resolve_config(config: Config | None) -> Config:
 
         return indexing_pkg.appconf
     return config
-
-
-def reload_appconf(envfile: str | None = None) -> Config:
-    """Reload the process-wide ``appconf`` from disk into the existing instance.
-
-    Uses *envfile*, else ``MEIPI_CONFIG_ENV``, else ``appconf.envfile``.
-    In-place update keeps ``from meipi.indexing import appconf`` bindings valid.
-    Create new ``DBOperations`` afterwards if connection settings changed.
-    """
-    import meipi.indexing as indexing_pkg
-
-    path = envfile or os.environ.get("MEIPI_CONFIG_ENV") or indexing_pkg.appconf.envfile
-    fresh = Config.load(path)
-    current = indexing_pkg.appconf
-    for field_name in Config.model_fields:
-        setattr(current, field_name, getattr(fresh, field_name))
-    return current
 
 
 def install_appconf(config: Config) -> None:

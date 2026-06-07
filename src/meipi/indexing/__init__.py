@@ -3,12 +3,12 @@
 Dokumente und Bilder können vom File-System gelesen werden und 
 ihre Metadaten sowie Vector-Einbettungen werden in einer Postgres-DB gespeichert.
 
-``appconf`` wird beim ersten Import geladen. Zur Laufzeit: Felder setzen, ``reload_appconf()``,
-oder ``install_appconf()`` für einen komplett neuen ``Config``-Satz.
+``appconf`` wird beim ersten Import geladen. Zur Laufzeit einzelne Felder setzen oder
+``install_appconf()`` für einen komplett neuen ``Config``-Satz. Änderungen an der Env-Datei
+erfordern einen Prozess-Neustart.
 """
 __all__ = ["Config", 
            "appconf",
-           "reload_appconf",
            "DBPool",
            "DBOperations",
            "DBMeta", "DBDoc", "DBPic", "Base", "DBDinoV2Vector", "DBCatalog",
@@ -16,11 +16,9 @@ __all__ = ["Config",
            "FTYPE"]
 __version__ = "0.0.1"
 
-import os
-from .config import Config, FTYPE, reload_appconf
+from .config import CONFIG_PATH, Config, FTYPE
 
-_envfile = os.environ.get("MEIPI_CONFIG_ENV", "config.env")
-appconf: Config = Config.load(_envfile)
+appconf: Config = Config(_env_file=CONFIG_PATH, config_path=CONFIG_PATH)
 
 from .operations import DBOperations, AsyncFileOperations
 from .model import DBMeta, DBDoc, DBPic, Base, DBDinoV2Vector, DBPool, DBCatalog
