@@ -8,15 +8,18 @@ x-watcher: &watcher-base
       condition: service_healthy
   networks:
     - postgresql_default
-  environment:
-      IND_PG_HOST: ${IND_PG_HOST:-pg-db}
-      IND_PG_PORT: ${IND_PG_PORT:-5432}
-      IND_PG_USER: ${IND_PG_USER:-postgres}
-      IND_PG_PASSWD: ${IND_PG_PASSWD:-postgres}
-      IND_PG_DATABASE: ${IND_PG_DATABASE:-postgres}
-      IND_PG_SCHEMA: ${IND_PG_SCHEMA:-meipi-indexing}
-      IND_TIKA_NOOCR_URL: http://tika:9998
-      IND_DOCROOT: /data
+
+# Merged into each watcher service. A child ``environment`` block replaces (not
+# merges with) the anchor's ``environment``, so DB settings must be included here.
+x-watcher-env: &watcher-env
+  IND_PG_HOST: ${IND_PG_HOST:-pg-db}
+  IND_PG_PORT: ${IND_PG_PORT:-5432}
+  IND_PG_USER: ${IND_PG_USER:-postgres}
+  IND_PG_PASSWD: ${IND_PG_PASSWD:-postgres}
+  IND_PG_DATABASE: ${IND_PG_DATABASE:-postgres}
+  IND_PG_SCHEMA: ${IND_PG_SCHEMA:-meipi-indexing}
+  IND_TIKA_NOOCR_URL: http://tika:9998
+  IND_DOCROOT: /data
 
 services:
   tika:
@@ -39,6 +42,7 @@ services:
   watcher-1:
     <<: *watcher-base
     environment:
+      <<: *watcher-env
       IND_WATCH_POOL_ID: ${IND_WATCH_POOL_ID:-1}
       IND_WATCH_PATH: ${IND_WATCH_PATH:-.}
       IND_WATCH_DEBOUNCE: ${IND_WATCH_DEBOUNCE:-1.0}
@@ -49,6 +53,7 @@ services:
   watcher-2:
     <<: *watcher-base
     environment:
+      <<: *watcher-env
       IND_WATCH_POOL_ID: ${IND_WATCH_POOL_ID_2:-2}
       IND_WATCH_PATH: ${IND_WATCH_PATH_2:-.}
       IND_WATCH_DEBOUNCE: ${IND_WATCH_DEBOUNCE_2:-${IND_WATCH_DEBOUNCE:-1.0}}
