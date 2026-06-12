@@ -54,11 +54,9 @@ def generate_image_embeddings(
     model, inp_batches: List[BatchFeature], device="cuda"
 ) -> np.ndarray:
     """Generate pooled embeddings for all batches and return one stacked array.
-
     The model is temporarily moved to ``device`` for inference and restored to its
     original device afterwards.
     """
-
     olddev = model.device
     model.to(device)
     embeddings = []
@@ -72,3 +70,4 @@ def generate_image_embeddings(
         embeddings.append(vector)
     model.to(olddev)
     return np.vstack(embeddings)
+
