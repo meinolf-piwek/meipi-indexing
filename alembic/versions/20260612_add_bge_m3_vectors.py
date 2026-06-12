@@ -34,6 +34,7 @@ def _schema() -> str:
 
 def upgrade() -> None:
     schema = _schema()
+    op.execute(f'SET search_path TO "{schema}"')
     op.create_table(
         "bge_m3_vectors",
         sa.Column("chunk_id", sa.Integer(), autoincrement=True, nullable=False),
