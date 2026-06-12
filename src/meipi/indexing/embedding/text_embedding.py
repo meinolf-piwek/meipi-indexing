@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from typing import Any, Sequence
 from transformers import AutoTokenizer
 
+from ..text_cleaning import clean_document_text
+
 
 @dataclass
 class ChunkConfig:
@@ -50,16 +52,7 @@ class DocumentChunker:
     # ------------------------
 
     def _clean_text(self, text: str) -> str:
-        text = text.replace("\r\n", "\n").replace("\r", "\n")
-        paragraphs = re.split(r"\n{2,}", text)
-        cleaned: list[str] = []
-        for para in paragraphs:
-            lines = [line.strip() for line in para.split("\n") if line.strip()]
-            if not lines:
-                continue
-            paragraph = re.sub(r"[ \t]+", " ", " ".join(lines))
-            cleaned.append(paragraph)
-        return "\n\n".join(cleaned).strip()
+        return clean_document_text(text)
 
     # ------------------------
     # Splitting
@@ -143,4 +136,3 @@ class DocumentChunker:
             merged = prev_overlap + self._space_tokens + chunks[i]
             overlapped.append(merged)
         return overlapped
-

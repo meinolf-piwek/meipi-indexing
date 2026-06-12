@@ -26,6 +26,7 @@ import sqlalchemy as sa
 from sqlalchemy.orm import sessionmaker, Session
 from .model import Base as ModelBase, DBMeta, DBPic, DBDoc, DBDinoV2Vector, DBVid, IdList, DBPool
 from .config import Config, FTYPE, resolve_config
+from .text_cleaning import clean_document_text
 
 WATCHER_TABLES: tuple[type[ModelBase], ...] = (
     DBPool,
@@ -213,7 +214,7 @@ class DBOperations():
             afop = AsyncFileOperations(pool=self.pool, config=self.config, skip_ocr=skipocr)
             for dbmeta in metalist:
                 _, content = await afop.tika_parse(dbmeta.path)
-                dbmeta.inhalt = content
+                dbmeta.inhalt = clean_document_text(content)
                 if dbmeta.ftype == "doc" and dbmeta.doc is None:
                     dbmeta.doc = DBDoc()
             session.flush()
@@ -438,6 +439,7 @@ class AsyncFileOperations(AsyncTikaClient):
             if not isinstance(content, str):
                 content = str(content) if content else ""
             content = content.strip("\n\r")
+            content = clean_document_text(content)
         except Exception as e:
             self.logger.error("Error %s parsing file %s", e, filepath)
             meta = {}

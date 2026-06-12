@@ -152,8 +152,43 @@ async def test_tika_parse_strips_leading_trailing_newlines(async_file_ops, monke
     dbmeta, content = await async_file_ops.tika_parse(rel_path)
 
     assert dbmeta is not None
-    assert content == "line one\nline two"
-    assert dbmeta.inhalt == "line one\nline two"
+    assert content == "line one line two"
+    assert dbmeta.inhalt == "line one line two"
+
+
+@pytest.mark.asyncio
+async def test_tika_parse_cleans_css_and_js_from_inhalt(async_file_ops, monkeypatch):
+    rel_path = "page.html"
+    (Path(async_file_ops.docroot) / rel_path).write_text("<html></html>", encoding="utf-8")
+    raw = (
+        ".navi { font-size: 11px; font-family: Arial; }\n\n"
+        "Vertrag über Dienstleistungen.\n\n"
+        "try { window.FB.init(); } catch (e) {}"
+    )
+
+    monkeypatch.setattr(
+        async_file_ops.rmeta.as_text,
+        "from_file",
+        AsyncMock(
+            return_value=[
+                _tika_response(
+                    {
+                        "Content-Type": "text/html",
+                        "Content-Length": len(raw),
+                        TikaKey.Content: raw,
+                    }
+                )
+            ]
+        ),
+    )
+
+    dbmeta, content = await async_file_ops.tika_parse(rel_path)
+
+    assert dbmeta is not None
+    assert "font-size" not in content
+    assert "window.FB" not in content
+    assert "Vertrag über Dienstleistungen." in content
+    assert dbmeta.inhalt == content
 
 
 @pytest.mark.asyncio

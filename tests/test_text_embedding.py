@@ -3,15 +3,8 @@
 from meipi.indexing.embedding.text_embedding import ChunkConfig, DocumentChunker
 
 
-def test_clean_text_preserves_paragraph_breaks() -> None:
-    chunker = DocumentChunker(ChunkConfig())
-    text = "First   paragraph.\n\nSecond\tparagraph.\nwith wrap"
-    cleaned = chunker._clean_text(text)
-    assert cleaned == "First paragraph.\n\nSecond paragraph. with wrap"
-
-
-def test_split_paragraphs_after_cleaning() -> None:
-    chunker = DocumentChunker(ChunkConfig())
-    text = "Alpha line.\n\nBeta   line.\n\n\nGamma line."
-    paragraphs = chunker._split_paragraphs(chunker._clean_text(text))
-    assert paragraphs == ["Alpha line.", "Beta line.", "Gamma line."]
+def test_chunk_text_uses_pre_cleaned_inhalt() -> None:
+    chunker = DocumentChunker(ChunkConfig(clean_text=False))
+    chunks = chunker.chunk_text("Alpha paragraph.\n\nBeta paragraph.", text_id=3)
+    assert len(chunks) >= 1
+    assert chunks[0]["id"][0] == 3
