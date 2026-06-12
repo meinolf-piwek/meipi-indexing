@@ -1,7 +1,7 @@
 import re
 from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Sequence
 from transformers import AutoTokenizer
 
 
@@ -18,6 +18,7 @@ class DocumentChunker:
     def __init__(self, config: ChunkConfig):
         self.config = config
         self.tokenizer = AutoTokenizer.from_pretrained(config.model_name)
+        self._space_tokens = self.tokenizer.encode(" ", add_special_tokens=False)
 
     # ------------------------
     # Public API
@@ -38,14 +39,27 @@ class DocumentChunker:
             for i, chunk in enumerate(chunks)
         ]
 
+    def chunk_documents(
+        self, document_list: Sequence[tuple[str, int]]
+    ) -> Iterator[dict[str, Any]]:
+        for text, text_id in document_list:
+            yield from self.chunk_text(text, text_id)
+
     # ------------------------
     # Cleaning
     # ------------------------
 
     def _clean_text(self, text: str) -> str:
-        text = re.sub(r"\s+", " ", text)
-        text = re.sub(r"\n\s*\n", "\n\n", text)
-        return text.strip()
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+        paragraphs = re.split(r"\n{2,}", text)
+        cleaned: list[str] = []
+        for para in paragraphs:
+            lines = [line.strip() for line in para.split("\n") if line.strip()]
+            if not lines:
+                continue
+            paragraph = re.sub(r"[ \t]+", " ", " ".join(lines))
+            cleaned.append(paragraph)
+        return "\n\n".join(cleaned).strip()
 
     # ------------------------
     # Splitting
@@ -60,90 +74,73 @@ class DocumentChunker:
     # ------------------------
 
     def _build_chunks(self, paragraphs: list[str]) -> list[str]:
-        chunks = []
-        current_chunk = []
-        current_tokens = 0
+        if not paragraphs:
+            return []
 
-        for para in paragraphs:
-            para_tokens = self._count_tokens(para)
-
-            # Falls einzelner Absatz zu groß → hart splitten
-            if para_tokens > self.config.max_tokens:
-                chunks.extend(self._split_long_text(para))
-                continue
-
-            if current_tokens + para_tokens <= self.config.max_tokens:
-                current_chunk.append(para)
-                current_tokens += para_tokens
-            else:
-                if current_chunk:
-                    chunks.append(" ".join(current_chunk))
-                current_chunk = [para]
-                current_tokens = para_tokens
-
-        if current_chunk:
-            chunks.append(" ".join(current_chunk))
-
-        # Overlap hinzufügen
-        return self._apply_overlap(chunks)
+        para_token_lists = self._encode_paragraphs(paragraphs)
+        chunk_token_lists = self._merge_paragraph_tokens(para_token_lists)
+        chunk_token_lists = self._apply_overlap_tokens(chunk_token_lists)
+        return [self.tokenizer.decode(tokens) for tokens in chunk_token_lists]
 
     # ------------------------
     # Token Handling
     # ------------------------
 
-    def _count_tokens(self, text: str) -> int:
-        return len(self.tokenizer.encode(text, add_special_tokens=False))
+    def _encode_paragraphs(self, paragraphs: list[str]) -> list[list[int]]:
+        if len(paragraphs) == 1:
+            return [self.tokenizer.encode(paragraphs[0], add_special_tokens=False)]
+        return self.tokenizer(paragraphs, add_special_tokens=False)["input_ids"]
 
-    def _split_long_text(self, text: str) -> list[str]:
-        tokens = self.tokenizer.encode(text, add_special_tokens=False)
+    def _merge_paragraph_tokens(
+        self, para_token_lists: list[list[int]]
+    ) -> list[list[int]]:
+        chunks: list[list[int]] = []
+        current: list[int] = []
+        current_len = 0
 
-        chunks = []
-        step = self.config.max_tokens - self.config.overlap
-
-        for i in range(0, len(tokens), step):
-            chunk_tokens = tokens[i:i + self.config.max_tokens]
-            chunk_text = self.tokenizer.decode(chunk_tokens)
-
-            if len(chunk_tokens) >= self.config.min_chunk_tokens:
-                chunks.append(chunk_text)
-
-        return chunks
-
-    # ------------------------
-    # Overlap
-    # ------------------------
-
-    def _apply_overlap(self, chunks: list[str]) -> list[str]:
-        """Apply overlap to the chunks."""
-        if self.config.overlap <= 0:
-            return chunks
-
-        overlapped = []
-
-        for i, chunk in enumerate(chunks):
-            if i == 0:
-                overlapped.append(chunk)
+        for para_tokens in para_token_lists:
+            para_len = len(para_tokens)
+            if para_len > self.config.max_tokens:
+                if current:
+                    chunks.append(current)
+                    current = []
+                    current_len = 0
+                chunks.extend(self._split_long_tokens(para_tokens))
                 continue
 
-            prev_tokens = self.tokenizer.encode(
-                chunks[i - 1],
-                add_special_tokens=False
-            )
+            extra = para_len + (len(self._space_tokens) if current else 0)
+            if current_len + extra <= self.config.max_tokens:
+                if current:
+                    current.extend(self._space_tokens)
+                current.extend(para_tokens)
+                current_len += extra
+            else:
+                if current:
+                    chunks.append(current)
+                current = list(para_tokens)
+                current_len = para_len
 
-            overlap_tokens = prev_tokens[-self.config.overlap:]
-            overlap_text = self.tokenizer.decode(overlap_tokens)
+        if current:
+            chunks.append(current)
+        return chunks
 
-            merged = overlap_text + " " + chunk
+    def _split_long_tokens(self, tokens: list[int]) -> list[list[int]]:
+        step = self.config.max_tokens - self.config.overlap
+        chunks: list[list[int]] = []
+        for i in range(0, len(tokens), step):
+            chunk_tokens = tokens[i : i + self.config.max_tokens]
+            if len(chunk_tokens) >= self.config.min_chunk_tokens:
+                chunks.append(chunk_tokens)
+        return chunks
+
+    def _apply_overlap_tokens(self, chunks: list[list[int]]) -> list[list[int]]:
+        if self.config.overlap <= 0 or len(chunks) <= 1:
+            return chunks
+
+        overlapped = [chunks[0]]
+        for i in range(1, len(chunks)):
+            prev_overlap = chunks[i - 1][-self.config.overlap :]
+            merged = prev_overlap + self._space_tokens + chunks[i]
             overlapped.append(merged)
-
         return overlapped
 
-class BulkDocumentChunker:
-    def __init__(self, chunker: DocumentChunker):
-        self.chunker = chunker
-
-    def batch_chunk_text(
-        self, text_list: list[tuple[str, int]]
-    ) -> Iterator[dict[str, Any]]:
-        for text, text_id in text_list:
-            yield from self.chunker.chunk_text(text, text_id)
