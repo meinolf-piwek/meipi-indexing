@@ -11,8 +11,9 @@ __all__ = ["Config",
            "appconf",
            "DBPool",
            "DBOperations",
-           "DBMeta", "DBDoc", "DBPic", "Base", "DBDinoV2Vector", "DBCatalog",
+           "DBMeta", "DBDoc", "DBPic", "Base", "DBDinoV2Vector", "DBBgeM3Vector", "DBCatalog",
            "AsyncFileOperations",
+           "DocumentChunk",
            "FTYPE"]
 __version__ = "0.0.1"
 
@@ -21,4 +22,5 @@ from .config import CONFIG_PATH, Config, FTYPE
 appconf: Config = Config()
 
 from .operations import DBOperations, AsyncFileOperations
-from .model import DBMeta, DBDoc, DBPic, Base, DBDinoV2Vector, DBPool, DBCatalog
+from .model import DBMeta, DBDoc, DBPic, Base, DBDinoV2Vector, DBBgeM3Vector, DBPool, DBCatalog
+from .document_chunks import DocumentChunk

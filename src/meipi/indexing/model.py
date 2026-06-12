@@ -25,7 +25,7 @@ from datetime import datetime
 from imagehash import phash
 
 
-from sqlalchemy import Index, MetaData, types, ForeignKey, TEXT, DateTime, select
+from sqlalchemy import Index, MetaData, types, ForeignKey, TEXT, DateTime, select, UniqueConstraint
 from sqlalchemy.orm import (
     Mapped,
     DeclarativeBase,
@@ -282,6 +282,13 @@ class DBDoc(Base):
     meta: Mapped["DBMeta"] = relationship(
         back_populates="doc", init=False, single_parent=True
     )
+    chunks: Mapped[list["DBBgeM3Vector"]] = relationship(
+        back_populates="doc",
+        init=False,
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        default=None,
+    )
 
 
 class DBPic(Base):
@@ -317,27 +324,34 @@ class DBVid(Base):
     
 class DocVectorMixin(MappedAsDataclass):
     """Mixin für DocVectorTables"""
+
     @classmethod
     @abstractmethod
     def _vector_size(cls) -> int:
         raise NotImplementedError("Subclasses must implement this method")
-    chunk_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    doc_id: Mapped[int] = mapped_column(ForeignKey("documents.id",ondelete="CASCADE"))
-    content: Mapped[str] = mapped_column(TEXT, nullable=True)
+
+    chunk_id: Mapped[int] = mapped_column(
+        primary_key=True, autoincrement=True, init=False, sort_order=0
+    )
+    doc_id: Mapped[int] = mapped_column(
+        ForeignKey("documents.id", ondelete="CASCADE"), sort_order=1
+    )
+    chunk_index: Mapped[int] = mapped_column(
+        doc="0-based chunk index within the document", sort_order=2
+    )
+    content: Mapped[str] = mapped_column(TEXT, nullable=False, sort_order=3)
 
     @declared_attr
     def vector(
         cls,
-    ) -> Mapped[
-        list[float]
-    ]:  
-        return mapped_column(Vector(cls._vector_size()), nullable=False)
+    ) -> Mapped[list[float] | None]:
+        return mapped_column(Vector(cls._vector_size()), nullable=True, default=None)
 
     @declared_attr
     def doc(
         cls,
     ) -> Mapped[DBDoc]:
-        return relationship()
+        return relationship(back_populates="chunks", init=False)
 
 
 class PicVectorMixin(MappedAsDataclass):
@@ -371,6 +385,19 @@ class DBDinoV2Vector(Base, PicVectorMixin):
     @classmethod
     def _vector_size(cls) -> int:
         return 1024  # Größe des Vektors für DINO-Modelle
+
+
+class DBBgeM3Vector(Base, DocVectorMixin):
+    """Chunk text and BGE-M3 embedding vectors for indexed documents."""
+
+    __tablename__ = "bge_m3_vectors"
+    __table_args__ = (
+        UniqueConstraint("doc_id", "chunk_index", name="uq_bge_m3_vectors_doc_chunk"),
+    )
+
+    @classmethod
+    def _vector_size(cls) -> int:
+        return 1024
 
 
 def _unqualify_orm_tables() -> None:

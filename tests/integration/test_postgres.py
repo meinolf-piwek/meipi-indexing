@@ -25,7 +25,7 @@ def test_recreate_tables_creates_core_tables(db_ops):
                     SELECT tablename FROM pg_tables
                     WHERE schemaname = 'public'
                       AND tablename IN (
-                        'datapools', 'filemeta', 'documents', 'pictures', 'dino_v2_vectors'
+                        'datapools', 'filemeta', 'documents', 'pictures', 'dino_v2_vectors', 'bge_m3_vectors'
                       )
                     ORDER BY tablename
                     """
@@ -35,6 +35,7 @@ def test_recreate_tables_creates_core_tables(db_ops):
             .all()
         )
     assert tables == [
+        "bge_m3_vectors",
         "datapools",
         "dino_v2_vectors",
         "documents",

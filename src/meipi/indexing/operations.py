@@ -24,9 +24,10 @@ import numpy as np
 from libxmp import utils as xmpu
 import sqlalchemy as sa
 from sqlalchemy.orm import sessionmaker, Session
-from .model import Base as ModelBase, DBMeta, DBPic, DBDoc, DBDinoV2Vector, DBVid, IdList, DBPool
+from .model import Base as ModelBase, DBMeta, DBPic, DBDoc, DBDinoV2Vector, DBBgeM3Vector, DBVid, IdList, DBPool
 from .config import Config, FTYPE, resolve_config
 from .text_cleaning import clean_document_text
+from .document_chunks import DocumentChunk, chunks_to_rows
 
 WATCHER_TABLES: tuple[type[ModelBase], ...] = (
     DBPool,
@@ -195,6 +196,30 @@ class DBOperations():
             if deleted:
                 self.logger.info("Removed index entry for %s", rel_path)
             return deleted > 0
+
+    def replace_document_chunks(
+        self, doc_id: int, chunks: Sequence[DocumentChunk]
+    ) -> int:
+        """Replace all BGE-M3 chunk rows for one document."""
+        with self.Session() as session:
+            session.execute(
+                sa.delete(DBBgeM3Vector).where(DBBgeM3Vector.doc_id == doc_id)
+            )
+            rows = chunks_to_rows(doc_id, chunks)
+            if rows:
+                session.add_all(rows)
+            session.commit()
+            return len(rows)
+
+    def chunk_and_store_document(
+        self, meta: DBMeta, chunker: Any, *, doc_id: int | None = None
+    ) -> int:
+        """Chunk ``meta.inhalt`` and persist rows in ``bge_m3_vectors``."""
+        if meta.doc is None:
+            raise ValueError(f"filemeta {meta.id} has no documents row")
+        doc_id = doc_id or meta.doc.id
+        chunks = chunker.chunk_text(meta.inhalt, meta_id=meta.id)
+        return self.replace_document_chunks(doc_id, chunks)
             
                 
     async def insert_docs_from_meta(self, skipocr: bool = True):

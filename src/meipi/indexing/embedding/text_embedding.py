@@ -1,9 +1,9 @@
 import re
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
-from typing import Any, Sequence
 from transformers import AutoTokenizer
 
+from ..document_chunks import DocumentChunk
 from ..text_cleaning import clean_document_text
 
 
@@ -26,7 +26,7 @@ class DocumentChunker:
     # Public API
     # ------------------------
 
-    def chunk_text(self, text: str, text_id: int = 0) -> list[dict[str, Any]]:
+    def chunk_text(self, text: str, meta_id: int = 0) -> list[DocumentChunk]:
         if self.config.clean_text:
             text = self._clean_text(text)
 
@@ -34,18 +34,15 @@ class DocumentChunker:
         chunks = self._build_chunks(paragraphs)
 
         return [
-            {
-                "text": chunk,
-                "id": (text_id, i)
-            }
-            for i, chunk in enumerate(chunks)
+            DocumentChunk(chunk_index=index, content=chunk, meta_id=meta_id)
+            for index, chunk in enumerate(chunks)
         ]
 
     def chunk_documents(
         self, document_list: Sequence[tuple[str, int]]
-    ) -> Iterator[dict[str, Any]]:
-        for text, text_id in document_list:
-            yield from self.chunk_text(text, text_id)
+    ) -> Iterator[DocumentChunk]:
+        for text, meta_id in document_list:
+            yield from self.chunk_text(text, meta_id)
 
     # ------------------------
     # Cleaning
