@@ -97,13 +97,18 @@ async def read_files_bulk(
             files = [path for path in files if path not in existing_set]
 
         batches = list(batched(files, batchsize))
+        tika_sem = asyncio.Semaphore(min(20, batchsize))
         for batch in tqdm(
             batches,
             desc=f"Reading {len(files)} files in {len(batches)} batches",
             total=len(batches),
             unit="batch",
         ):
-            tasks = [asyncio.create_task(afop.file_to_db(file)) for file in batch]
+            async def _index_one(file: str) -> DBMeta | None:
+                async with tika_sem:
+                    return await afop.file_to_db(file)
+
+            tasks = [asyncio.create_task(_index_one(file)) for file in batch]
             metalist = []
             async for task in asyncio.as_completed(tasks):
                 dbmeta = await task

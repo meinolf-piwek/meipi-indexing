@@ -284,10 +284,9 @@ class DBDoc(Base):
     )
     chunks: Mapped[list["DBBgeM3Vector"]] = relationship(
         back_populates="doc",
-        init=False,
+        default_factory=list,
         cascade="all, delete-orphan",
         passive_deletes=True,
-        default=None,
     )
 
 
@@ -351,7 +350,7 @@ class DocVectorMixin(MappedAsDataclass):
     def doc(
         cls,
     ) -> Mapped[DBDoc]:
-        return relationship(back_populates="chunks", init=False)
+        return relationship(back_populates="chunks", init=False, single_parent=True)
 
 
 class PicVectorMixin(MappedAsDataclass):

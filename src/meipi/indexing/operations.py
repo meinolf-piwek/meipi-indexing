@@ -466,7 +466,7 @@ class AsyncFileOperations(AsyncTikaClient):
             content = content.strip("\n\r")
             content = clean_document_text(content)
         except Exception as e:
-            self.logger.error("Error %s parsing file %s", e, filepath)
+            self.logger.error("Error parsing file %s: %r", filepath, e)
             meta = {}
             content = ""
         
