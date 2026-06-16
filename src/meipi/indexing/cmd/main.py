@@ -19,6 +19,7 @@ async def index_file(
     pool: DBPool | None = None,
     rel_path: str,
     update_thumbs: bool = True,
+    store_chunks: bool = True,
     config: Config | None = None,
 ) -> bool:
     """Index or re-index a single file in the database."""
@@ -48,6 +49,9 @@ async def index_file(
             session.flush()
             session.commit()
 
+    if store_chunks:
+        dbop.store_chunks_for_meta(dbmeta)
+
     if update_thumbs:
         if dbmeta.ftype == FTYPE.DOC:
             dbop.update_thumb_for_doc(dbmeta.id, rel_path)
@@ -64,6 +68,7 @@ async def read_files_bulk(
     batchsize: int = 500,
     incremental: bool = True,
     update_thumbs: bool = True,
+    store_chunks: bool = True,
     config: Config | None = None,
 ) -> None:
     """Read files from the filesystem, extract metadata, and store them in the DB.
@@ -75,6 +80,7 @@ async def read_files_bulk(
         batchsize: Number of files processed per batch.
         incremental: Skip files whose path is already in filemeta for this pool.
         update_thumbs: Run thumbnail generation after ingest.
+        store_chunks: Chunk document text into ``bge_m3_vectors`` after ingest.
         config: Application configuration (defaults to ``appconf``).
     """
     config = resolve_config(config)
@@ -119,6 +125,8 @@ async def read_files_bulk(
                     session.add_all(metalist)
                     session.flush()
                     session.commit()
+                if store_chunks:
+                    dbop.store_chunks_for_meta_list(metalist)
 
     if update_thumbs:
         print("Updating thumbs")

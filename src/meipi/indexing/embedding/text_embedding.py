@@ -1,135 +1,215 @@
-import re
-from collections.abc import Iterator, Sequence
-from dataclasses import dataclass
-from transformers import AutoTokenizer
+from __future__ import annotations
 
-from ..document_chunks import DocumentChunk
-from ..text_cleaning import clean_document_text
+from dataclasses import dataclass
+from typing import Iterator, Sequence
+
+import multiprocessing as mp
+import numpy as np
+import torch
+from transformers import AutoModel, AutoTokenizer, PreTrainedModel, PreTrainedTokenizer
+
+from ..model import DBBgeM3Vector
+
+_MP_CTX = mp.get_context("spawn")
+
+
+@dataclass(frozen=True, slots=True)
+class ChunkItem:
+    doc_id: int
+    chunk_index: int
+    content: str
 
 
 @dataclass
-class ChunkConfig:
+class EmbeddingConfig:
     model_name: str = "BAAI/bge-m3"
-    max_tokens: int = 512
-    overlap: int = 80
-    min_chunk_tokens: int = 50
-    clean_text: bool = True
+    device: str = "cuda" if torch.cuda.is_available() else "cpu"
+    batch_size: int = 16
+    max_length: int = 512
+    normalize: bool = True
+    use_fp16: bool = True
+    num_workers: int = 8
+    max_queue_size: int = 2000
 
 
-class DocumentChunker:
-    def __init__(self, config: ChunkConfig):
+def _token_worker(
+    chunk_queue: mp.Queue,
+    token_queue: mp.Queue,
+    config: EmbeddingConfig,
+) -> None:
+    TextEmbedding(config, load_model=False).token_worker_loop(chunk_queue, token_queue)
+
+
+def _embedding_worker(
+    token_queue: mp.Queue,
+    embedding_queue: mp.Queue,
+    config: EmbeddingConfig,
+    num_token_workers: int,
+) -> None:
+    TextEmbedding(config).embedding_worker_loop(
+        token_queue, embedding_queue, num_token_workers
+    )
+
+
+class TextEmbedding:
+    PREFIX = "passage: "
+
+    def __init__(self, config: EmbeddingConfig, *, load_model: bool = True):
         self.config = config
-        self.tokenizer = AutoTokenizer.from_pretrained(config.model_name)
-        self._space_tokens = self.tokenizer.encode(" ", add_special_tokens=False)
+        self.tokenizer: PreTrainedTokenizer = AutoTokenizer.from_pretrained(
+            config.model_name
+        )
+        self.model: PreTrainedModel | None = None
+        if load_model:
+            self._load_model()
 
-    # ------------------------
-    # Public API
-    # ------------------------
+    def _load_model(self) -> None:
+        model = AutoModel.from_pretrained(self.config.model_name)
+        model.to(self.config.device)  # type: ignore[arg-type]
+        if self.config.use_fp16 and "cuda" in self.config.device:
+            model = model.half()
+        model.eval()
+        self.model = model
 
-    def chunk_text(self, text: str, meta_id: int = 0) -> list[DocumentChunk]:
-        if self.config.clean_text:
-            text = self._clean_text(text)
+    def _mean_pooling(
+        self, last_hidden_state: torch.Tensor, attention_mask: torch.Tensor
+    ) -> torch.Tensor:
+        mask = attention_mask.unsqueeze(-1).expand(last_hidden_state.size()).float()
+        summed = (last_hidden_state * mask).sum(dim=1)
+        counts = mask.sum(dim=1).clamp(min=1e-9)
+        embeddings = summed / counts
+        if self.config.normalize:
+            embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
+        return embeddings
 
-        paragraphs = self._split_paragraphs(text)
-        chunks = self._build_chunks(paragraphs)
+    def _to_chunk_item(self, chunk: ChunkItem | DBBgeM3Vector) -> ChunkItem:
+        if isinstance(chunk, ChunkItem):
+            return chunk
+        return ChunkItem(
+            doc_id=chunk.doc_id,
+            chunk_index=chunk.chunk_index,
+            content=chunk.content,
+        )
 
-        return [
-            DocumentChunk(chunk_index=index, content=chunk, meta_id=meta_id)
-            for index, chunk in enumerate(chunks)
-        ]
+    def _encode_chunk(self, chunk_item: ChunkItem) -> list[int]:
+        return self.tokenizer.encode(
+            self.PREFIX + chunk_item.content,
+            add_special_tokens=False,
+            truncation=True,
+            max_length=self.config.max_length,
+        )
 
-    def chunk_documents(
-        self, document_list: Sequence[tuple[str, int]]
-    ) -> Iterator[DocumentChunk]:
-        for text, meta_id in document_list:
-            yield from self.chunk_text(text, meta_id)
+    def embed_batch(self, batch: Sequence[str]) -> np.ndarray:
+        texts = [self.PREFIX + text for text in batch]
+        encoded = self.tokenizer(
+            list(texts),
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=self.config.max_length,
+        )
+        return self._embed_encoded(encoded)
 
-    # ------------------------
-    # Cleaning
-    # ------------------------
+    def embed_token_ids_batch(self, batch_input_ids: list[list[int]]) -> np.ndarray:
+        encoded = self.tokenizer.pad(
+            {"input_ids": batch_input_ids},
+            padding=True,
+            return_tensors="pt",
+        )
+        return self._embed_encoded(encoded)
 
-    def _clean_text(self, text: str) -> str:
-        return clean_document_text(text)
+    def _embed_encoded(self, encoded: dict[str, torch.Tensor]) -> np.ndarray:
+        if self.model is None:
+            raise RuntimeError("Model not loaded; use TextEmbedding(config, load_model=True)")
+        input_ids = encoded["input_ids"].to(self.config.device, non_blocking=True)
+        attention_mask = encoded["attention_mask"].to(
+            self.config.device, non_blocking=True
+        )
+        with torch.no_grad():
+            outputs = self.model(input_ids=input_ids, attention_mask=attention_mask)
+            embeddings = self._mean_pooling(outputs.last_hidden_state, attention_mask)
+        return embeddings.detach().cpu().numpy()
 
-    # ------------------------
-    # Splitting
-    # ------------------------
+    def token_worker_loop(self, chunk_queue: mp.Queue, token_queue: mp.Queue) -> None:
+        while True:
+            chunk_item = chunk_queue.get()
+            if chunk_item is None:
+                break
+            token_queue.put((chunk_item, self._encode_chunk(chunk_item)))
+        token_queue.put(None)
 
-    def _split_paragraphs(self, text: str) -> list[str]:
-        paragraphs = re.split(r"\n{2,}", text)
-        return [p.strip() for p in paragraphs if p.strip()]
+    def embedding_worker_loop(
+        self,
+        token_queue: mp.Queue,
+        embedding_queue: mp.Queue,
+        num_token_workers: int,
+    ) -> None:
+        batch: list[tuple[ChunkItem, list[int]]] = []
+        workers_done = 0
 
-    # ------------------------
-    # Chunk Builder
-    # ------------------------
-
-    def _build_chunks(self, paragraphs: list[str]) -> list[str]:
-        if not paragraphs:
-            return []
-
-        para_token_lists = self._encode_paragraphs(paragraphs)
-        chunk_token_lists = self._merge_paragraph_tokens(para_token_lists)
-        chunk_token_lists = self._apply_overlap_tokens(chunk_token_lists)
-        return [self.tokenizer.decode(tokens) for tokens in chunk_token_lists]
-
-    # ------------------------
-    # Token Handling
-    # ------------------------
-
-    def _encode_paragraphs(self, paragraphs: list[str]) -> list[list[int]]:
-        if len(paragraphs) == 1:
-            return [self.tokenizer.encode(paragraphs[0], add_special_tokens=False)]
-        return self.tokenizer(paragraphs, add_special_tokens=False)["input_ids"]
-
-    def _merge_paragraph_tokens(
-        self, para_token_lists: list[list[int]]
-    ) -> list[list[int]]:
-        chunks: list[list[int]] = []
-        current: list[int] = []
-        current_len = 0
-
-        for para_tokens in para_token_lists:
-            para_len = len(para_tokens)
-            if para_len > self.config.max_tokens:
-                if current:
-                    chunks.append(current)
-                    current = []
-                    current_len = 0
-                chunks.extend(self._split_long_tokens(para_tokens))
+        while workers_done < num_token_workers:
+            item = token_queue.get()
+            if item is None:
+                workers_done += 1
                 continue
 
-            extra = para_len + (len(self._space_tokens) if current else 0)
-            if current_len + extra <= self.config.max_tokens:
-                if current:
-                    current.extend(self._space_tokens)
-                current.extend(para_tokens)
-                current_len += extra
-            else:
-                if current:
-                    chunks.append(current)
-                current = list(para_tokens)
-                current_len = para_len
+            chunk_item, token_ids = item
+            batch.append((chunk_item, token_ids))
+            if len(batch) < self.config.batch_size:
+                continue
 
-        if current:
-            chunks.append(current)
-        return chunks
+            self._flush_embedding_batch(batch, embedding_queue)
+            batch = []
 
-    def _split_long_tokens(self, tokens: list[int]) -> list[list[int]]:
-        step = self.config.max_tokens - self.config.overlap
-        chunks: list[list[int]] = []
-        for i in range(0, len(tokens), step):
-            chunk_tokens = tokens[i : i + self.config.max_tokens]
-            if len(chunk_tokens) >= self.config.min_chunk_tokens:
-                chunks.append(chunk_tokens)
-        return chunks
+        if batch:
+            self._flush_embedding_batch(batch, embedding_queue)
 
-    def _apply_overlap_tokens(self, chunks: list[list[int]]) -> list[list[int]]:
-        if self.config.overlap <= 0 or len(chunks) <= 1:
-            return chunks
+        embedding_queue.put(None)
 
-        overlapped = [chunks[0]]
-        for i in range(1, len(chunks)):
-            prev_overlap = chunks[i - 1][-self.config.overlap :]
-            merged = prev_overlap + self._space_tokens + chunks[i]
-            overlapped.append(merged)
-        return overlapped
+    def _flush_embedding_batch(
+        self,
+        batch: list[tuple[ChunkItem, list[int]]],
+        embedding_queue: mp.Queue,
+    ) -> None:
+        token_id_batch = [token_ids for _, token_ids in batch]
+        embeddings = self.embed_token_ids_batch(token_id_batch)
+        for (chunk, _), vector in zip(batch, embeddings):
+            embedding_queue.put((chunk, vector))
+
+    def run(
+        self, chunklist: Sequence[ChunkItem | DBBgeM3Vector]
+    ) -> Iterator[tuple[ChunkItem, np.ndarray]]:
+        chunk_queue: mp.Queue = _MP_CTX.Queue(maxsize=self.config.max_queue_size)
+        token_queue: mp.Queue = _MP_CTX.Queue(maxsize=self.config.max_queue_size)
+        embedding_queue: mp.Queue = _MP_CTX.Queue(maxsize=self.config.max_queue_size)
+
+        token_processes = [
+            _MP_CTX.Process(
+                target=_token_worker,
+                args=(chunk_queue, token_queue, self.config),
+            )
+            for _ in range(self.config.num_workers)
+        ]
+        embedding_process = _MP_CTX.Process(
+            target=_embedding_worker,
+            args=(token_queue, embedding_queue, self.config, self.config.num_workers),
+        )
+
+        for process in token_processes:
+            process.start()
+        embedding_process.start()
+
+        for chunk in chunklist:
+            chunk_queue.put(self._to_chunk_item(chunk))
+        for _ in token_processes:
+            chunk_queue.put(None)
+
+        for process in token_processes:
+            process.join()
+        embedding_process.join()
+
+        while True:
+            item = embedding_queue.get()
+            if item is None:
+                break
+            yield item

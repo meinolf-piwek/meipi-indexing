@@ -160,6 +160,11 @@ def clear_pool(ctx: click.Context, pool_id: int, yes: bool) -> None:
     is_flag=True,
     help="Skip thumbnail generation after ingest",
 )
+@click.option(
+    "--no-chunks",
+    is_flag=True,
+    help="Skip chunking document text into bge_m3_vectors after ingest",
+)
 @click.pass_context
 def read_files(
     ctx: click.Context,
@@ -168,6 +173,7 @@ def read_files(
     batch_size: int,
     no_incremental: bool,
     no_thumbs: bool,
+    no_chunks: bool,
 ) -> None:
     """Ingest files from a pool directory into the database."""
     asyncio.run(
@@ -177,6 +183,7 @@ def read_files(
             batchsize=batch_size,
             incremental=not no_incremental,
             update_thumbs=not no_thumbs,
+            store_chunks=not no_chunks,
         )
     )
 
@@ -239,6 +246,36 @@ def insert_pics(ctx: click.Context, pool_id: int) -> None:
     dbop = _db_ops(pool_id)
     dbop.insert_pics_from_meta()
     click.echo(f"Inserted picture rows for pool {pool_id}.")
+
+
+@cli.command("insert-chunks")
+@click.option(
+    "--pool-id",
+    type=int,
+    required=True,
+    help="Datapool id from the datapools table",
+)
+@click.pass_context
+def insert_chunks(ctx: click.Context, pool_id: int) -> None:
+    """Create chunks only for documents that have none yet (no overwrite)."""
+    dbop = _db_ops(pool_id)
+    count = dbop.insert_missing_chunks_from_meta()
+    click.echo(f"Inserted {count} chunks for pool {pool_id}.")
+
+
+@cli.command("update-chunks")
+@click.option(
+    "--pool-id",
+    type=int,
+    required=True,
+    help="Datapool id from the datapools table",
+)
+@click.pass_context
+def update_chunks(ctx: click.Context, pool_id: int) -> None:
+    """Re-chunk and replace document text for all indexed doc filemeta in a pool."""
+    dbop = _db_ops(pool_id)
+    count = dbop.update_chunks_from_meta()
+    click.echo(f"Stored {count} chunks for pool {pool_id}.")
 
 
 @cli.command("insert-docs")

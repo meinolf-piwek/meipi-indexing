@@ -27,7 +27,7 @@ from sqlalchemy.orm import sessionmaker, Session
 from .model import Base as ModelBase, DBMeta, DBPic, DBDoc, DBDinoV2Vector, DBBgeM3Vector, DBVid, IdList, DBPool
 from .config import Config, FTYPE, resolve_config
 from .text_cleaning import clean_document_text
-from .document_chunks import DocumentChunk, chunks_to_rows
+from .embedding.text_preprocess import chunks_to_rows
 
 WATCHER_TABLES: tuple[type[ModelBase], ...] = (
     DBPool,
@@ -74,6 +74,7 @@ class DBOperations():
             raise
         else:
             self.logger.info("PostgreSQL engine created successfully.")
+        self._document_chunker_instance: Any = None
         if pool_id is not None:
             self.get_pool(pool_id)
         elif pool is not None:
@@ -197,15 +198,35 @@ class DBOperations():
                 self.logger.info("Removed index entry for %s", rel_path)
             return deleted > 0
 
+    def _document_chunker(self) -> Any:
+        if self._document_chunker_instance is None:
+            from .embedding.text_preprocess import ChunkConfig, DocumentChunker
+
+            self._document_chunker_instance = DocumentChunker(
+                ChunkConfig(clean_text=False)
+            )
+        return self._document_chunker_instance
+
+    def insert_document_chunks(
+        self, doc_id: int, contents: Sequence[str]
+    ) -> int:
+        """Insert chunk rows without removing existing ones."""
+        with self.Session() as session:
+            rows = chunks_to_rows(doc_id, contents)
+            if rows:
+                session.add_all(rows)
+            session.commit()
+            return len(rows)
+
     def replace_document_chunks(
-        self, doc_id: int, chunks: Sequence[DocumentChunk]
+        self, doc_id: int, contents: Sequence[str]
     ) -> int:
         """Replace all BGE-M3 chunk rows for one document."""
         with self.Session() as session:
             session.execute(
                 sa.delete(DBBgeM3Vector).where(DBBgeM3Vector.doc_id == doc_id)
             )
-            rows = chunks_to_rows(doc_id, chunks)
+            rows = chunks_to_rows(doc_id, contents)
             if rows:
                 session.add_all(rows)
             session.commit()
@@ -218,8 +239,118 @@ class DBOperations():
         if meta.doc is None:
             raise ValueError(f"filemeta {meta.id} has no documents row")
         doc_id = doc_id or meta.doc.id
-        chunks = chunker.chunk_text(meta.inhalt, meta_id=meta.id)
-        return self.replace_document_chunks(doc_id, chunks)
+        contents = chunker.chunk_text(meta.inhalt)
+        return self.replace_document_chunks(doc_id, contents)
+
+    def store_chunks_for_meta(self, meta: DBMeta) -> int:
+        """Chunk and persist rows for one indexed document filemeta."""
+        if meta.ftype != FTYPE.DOC or not meta.inhalt.strip():
+            return 0
+        if meta.doc is None:
+            self.logger.warning(
+                "Skipping chunks for %s: no documents row", meta.path
+            )
+            return 0
+        if meta.doc.id is None:
+            self.logger.warning(
+                "Skipping chunks for %s: documents row has no id", meta.path
+            )
+            return 0
+        return self.chunk_and_store_document(meta, self._document_chunker())
+
+    def insert_chunks_for_meta(self, meta: DBMeta) -> int:
+        """Chunk and insert rows for one document without touching existing chunks."""
+        if meta.ftype != FTYPE.DOC or not meta.inhalt.strip():
+            return 0
+        if meta.doc is None:
+            self.logger.warning(
+                "Skipping chunks for %s: no documents row", meta.path
+            )
+            return 0
+        if meta.doc.id is None:
+            self.logger.warning(
+                "Skipping chunks for %s: documents row has no id", meta.path
+            )
+            return 0
+        chunks = self._document_chunker().chunk_text(meta.inhalt)
+        return self.insert_document_chunks(meta.doc.id, chunks)
+
+    def store_chunks_for_meta_list(self, metalist: Sequence[DBMeta]) -> int:
+        """Chunk and persist rows for a batch of newly ingested filemeta rows."""
+        total = 0
+        for meta in metalist:
+            try:
+                total += self.store_chunks_for_meta(meta)
+            except Exception:
+                self.logger.exception("Failed to store chunks for %s", meta.path)
+        return total
+
+    def insert_missing_chunks_from_meta(self) -> int:
+        """Chunk documents that have no rows in ``bge_m3_vectors`` yet."""
+        from sqlalchemy.orm import joinedload
+
+        has_chunks = (
+            sa.select(DBBgeM3Vector.chunk_id)
+            .select_from(DBDoc)
+            .join(DBBgeM3Vector, DBBgeM3Vector.doc_id == DBDoc.id)
+            .where(DBDoc.meta_id == DBMeta.id)
+            .correlate(DBMeta)
+            .exists()
+        )
+        total = 0
+        with self.Session() as session:
+            stmt = (
+                sa.select(DBMeta)
+                .options(joinedload(DBMeta.doc))
+                .where(
+                    DBMeta.pool_id == self.pool.id,
+                    DBMeta.ftype == FTYPE.DOC,
+                    DBMeta.inhalt != "",
+                    ~has_chunks,
+                )
+            )
+            metalist = session.execute(stmt).scalars().unique().all()
+            for meta in metalist:
+                if meta.doc is None:
+                    meta.doc = DBDoc()
+            session.flush()
+            for meta in metalist:
+                try:
+                    total += self.insert_chunks_for_meta(meta)
+                except Exception:
+                    self.logger.exception(
+                        "Failed to insert chunks for %s", meta.path
+                    )
+        return total
+
+    def update_chunks_from_meta(self) -> int:
+        """Re-chunk and replace rows for all doc filemeta in the pool."""
+        from sqlalchemy.orm import joinedload
+
+        total = 0
+        with self.Session() as session:
+            stmt = (
+                sa.select(DBMeta)
+                .options(joinedload(DBMeta.doc))
+                .where(
+                    DBMeta.pool_id == self.pool.id,
+                    DBMeta.ftype == FTYPE.DOC,
+                    DBMeta.inhalt != "",
+                )
+            )
+            metalist = session.execute(stmt).scalars().unique().all()
+            for meta in metalist:
+                if meta.doc is None:
+                    meta.doc = DBDoc()
+            session.flush()
+            for meta in metalist:
+                try:
+                    total += self.store_chunks_for_meta(meta)
+                except Exception:
+                    self.logger.exception(
+                        "Failed to store chunks for %s", meta.path
+                    )
+        return total
             
                 
     async def insert_docs_from_meta(self, skipocr: bool = True):
