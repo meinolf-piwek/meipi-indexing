@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import queue
 from dataclasses import dataclass
+from queue import Empty
 from typing import Iterator, Sequence
+import threading
 
+from tqdm.auto import tqdm
 import multiprocessing as mp
 import numpy as np
 import torch
@@ -108,6 +112,7 @@ class TextEmbedding:
             truncation=True,
             max_length=self.config.max_length,
         )
+        
         return self._embed_encoded(encoded)
 
     def embed_token_ids_batch(self, batch_input_ids: list[list[int]]) -> np.ndarray:
@@ -176,6 +181,16 @@ class TextEmbedding:
         for (chunk, _), vector in zip(batch, embeddings):
             embedding_queue.put((chunk, vector))
 
+    def _drain_embedding_queue(
+        self, embedding_queue: mp.Queue, sink: queue.Queue
+    ) -> None:
+        while True:
+            item = embedding_queue.get()
+            if item is None:
+                sink.put(None)
+                return
+            sink.put(item)
+
     def run(
         self, chunklist: Sequence[ChunkItem | DBBgeM3Vector]
     ) -> Iterator[tuple[ChunkItem, np.ndarray]]:
@@ -199,7 +214,15 @@ class TextEmbedding:
             process.start()
         embedding_process.start()
 
-        for chunk in chunklist:
+        result_queue: queue.Queue = queue.Queue()
+        drainer = threading.Thread(
+            target=self._drain_embedding_queue,
+            args=(embedding_queue, result_queue),
+            daemon=True,
+        )
+        drainer.start()
+
+        for chunk in tqdm(chunklist):
             chunk_queue.put(self._to_chunk_item(chunk))
         for _ in token_processes:
             chunk_queue.put(None)
@@ -207,9 +230,13 @@ class TextEmbedding:
         for process in token_processes:
             process.join()
         embedding_process.join()
+        drainer.join()
 
         while True:
-            item = embedding_queue.get()
+            try:
+                item = result_queue.get_nowait()
+            except Empty:
+                break
             if item is None:
                 break
             yield item
