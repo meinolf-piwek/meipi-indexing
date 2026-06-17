@@ -1,16 +1,19 @@
 from __future__ import annotations
 
-import queue
 from dataclasses import dataclass
-from queue import Empty
 from typing import Iterator, Sequence
-import threading
 
 from tqdm.auto import tqdm
 import multiprocessing as mp
 import numpy as np
 import torch
-from transformers import AutoModel, AutoTokenizer, PreTrainedModel, PreTrainedTokenizer
+from transformers import (
+    AutoModel,
+    AutoTokenizer,
+    BatchEncoding,
+    PreTrainedModel,
+    PreTrainedTokenizer,
+)
 
 from ..model import DBBgeM3Vector
 
@@ -123,7 +126,7 @@ class TextEmbedding:
         )
         return self._embed_encoded(encoded)
 
-    def _embed_encoded(self, encoded: dict[str, torch.Tensor]) -> np.ndarray:
+    def _embed_encoded(self, encoded: BatchEncoding) -> np.ndarray:
         if self.model is None:
             raise RuntimeError("Model not loaded; use TextEmbedding(config, load_model=True)")
         input_ids = encoded["input_ids"].to(self.config.device, non_blocking=True)
@@ -181,22 +184,12 @@ class TextEmbedding:
         for (chunk, _), vector in zip(batch, embeddings):
             embedding_queue.put((chunk, vector))
 
-    def _drain_embedding_queue(
-        self, embedding_queue: mp.Queue, sink: queue.Queue
-    ) -> None:
-        while True:
-            item = embedding_queue.get()
-            if item is None:
-                sink.put(None)
-                return
-            sink.put(item)
-
     def run(
         self, chunklist: Sequence[ChunkItem | DBBgeM3Vector]
     ) -> Iterator[tuple[ChunkItem, np.ndarray]]:
         chunk_queue: mp.Queue = _MP_CTX.Queue(maxsize=self.config.max_queue_size)
         token_queue: mp.Queue = _MP_CTX.Queue(maxsize=self.config.max_queue_size)
-        embedding_queue: mp.Queue = _MP_CTX.Queue(maxsize=self.config.max_queue_size)
+        embedding_queue: mp.Queue = _MP_CTX.Queue(maxsize=0)
 
         token_processes = [
             _MP_CTX.Process(
@@ -214,14 +207,6 @@ class TextEmbedding:
             process.start()
         embedding_process.start()
 
-        result_queue: queue.Queue = queue.Queue()
-        drainer = threading.Thread(
-            target=self._drain_embedding_queue,
-            args=(embedding_queue, result_queue),
-            daemon=True,
-        )
-        drainer.start()
-
         for chunk in tqdm(chunklist):
             chunk_queue.put(self._to_chunk_item(chunk))
         for _ in token_processes:
@@ -230,13 +215,9 @@ class TextEmbedding:
         for process in token_processes:
             process.join()
         embedding_process.join()
-        drainer.join()
 
         while True:
-            try:
-                item = result_queue.get_nowait()
-            except Empty:
-                break
+            item = embedding_queue.get()
             if item is None:
                 break
             yield item
