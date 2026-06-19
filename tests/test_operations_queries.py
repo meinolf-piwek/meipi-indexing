@@ -19,10 +19,8 @@ def _meta_without_child_stmt(*, pool_id: int, ftype: str, child_model):
 
 def test_insert_missing_chunks_stmt_selects_filemeta_without_vectors():
     has_chunks = (
-        sa.select(DBBgeM3Vector.chunk_id)
-        .select_from(DBMeta)
-        .join(DBBgeM3Vector, DBBgeM3Vector.doc_id == DBMeta.id)
-        .where(DBMeta.id == DBMeta.id)
+        sa.select(DBBgeM3Vector.doc_id)
+        .where(DBBgeM3Vector.doc_id == DBMeta.id)
         .correlate(DBMeta)
         .exists()
     )

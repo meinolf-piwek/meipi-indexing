@@ -31,7 +31,7 @@ async def test_index_file_persists_inhalt_on_reindex(
     dbop.pool = sample_pool
     dbop.Session = MagicMock(return_value=session)
     dbop.update_thumb_for_pic = MagicMock()
-    dbop.store_chunks_for_meta = MagicMock(return_value=2)
+    dbop.upsert_document_chunks = MagicMock(return_value=2)
 
     now = datetime.now()
     new_meta = DBMeta(
@@ -78,4 +78,6 @@ async def test_index_file_persists_inhalt_on_reindex(
     session.execute.assert_called_once()
     session.flush.assert_called()
     session.commit.assert_called_once()
-    dbop.store_chunks_for_meta.assert_called_once_with(new_meta)
+    dbop.upsert_document_chunks.assert_called_once_with(
+        new_meta.id, "updated body text"
+    )

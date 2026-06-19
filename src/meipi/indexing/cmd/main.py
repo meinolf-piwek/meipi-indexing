@@ -49,8 +49,8 @@ async def index_file(
             session.flush()
             session.commit()
 
-    if store_chunks:
-        dbop.store_chunks_for_meta(dbmeta)
+    if store_chunks and dbmeta.inhalt.strip():
+        dbop.upsert_document_chunks(dbmeta.id, dbmeta.inhalt)
 
     if update_thumbs:
         if dbmeta.ftype == FTYPE.DOC:
@@ -126,7 +126,9 @@ async def read_files_bulk(
                     session.flush()
                     session.commit()
                 if store_chunks:
-                    dbop.store_chunks_for_meta_list(metalist)
+                    for meta in metalist:
+                        if meta.inhalt.strip():
+                            dbop.upsert_document_chunks(meta.id, meta.inhalt)
 
     if update_thumbs:
         print("Updating thumbs")

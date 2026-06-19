@@ -25,7 +25,7 @@ from datetime import datetime
 from imagehash import phash
 
 
-from sqlalchemy import Index, MetaData, types, ForeignKey, TEXT, DateTime, select, UniqueConstraint
+from sqlalchemy import Index, MetaData, types, ForeignKey, TEXT, DateTime, select
 from sqlalchemy.orm import (
     Mapped,
     DeclarativeBase,
@@ -327,12 +327,7 @@ class ChunkItem(MappedAsDataclass):
     chunk_index: Mapped[int] = mapped_column(primary_key=True)
     content: Mapped[str] = mapped_column(TEXT, nullable=False)
 
-    # def to_chunk_item(self) -> ChunkItem:
-    #     return ChunkItem(
-    #         doc_id=self.doc_id,
-    #         chunk_index=self.chunk_index,
-    #         content=self.content,
-    #     )
+    
 
 class DocVectorMixin(ChunkItem):
     """Mixin für DocVectorTables"""
@@ -341,11 +336,6 @@ class DocVectorMixin(ChunkItem):
     @abstractmethod
     def _vector_size(cls) -> int:
         raise NotImplementedError("Subclasses must implement this method")
-
-    chunk_id: Mapped[int] = mapped_column(
-        primary_key=True, autoincrement=True, init=False, sort_order=0
-    )
-    
 
     @declared_attr
     def vector(
@@ -397,9 +387,6 @@ class DBBgeM3Vector(Base, DocVectorMixin):
     """Chunk text and BGE-M3 embedding vectors for indexed documents."""
 
     __tablename__ = "bge_m3_vectors"
-    __table_args__ = (
-        UniqueConstraint("doc_id", "chunk_index", name="uq_bge_m3_vectors_doc_chunk"),
-    )
 
     @classmethod
     def _vector_size(cls) -> int:

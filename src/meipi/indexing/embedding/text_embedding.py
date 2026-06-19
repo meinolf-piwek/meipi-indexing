@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Iterator, Sequence, cast
-
+import time
 from tqdm.auto import tqdm
 import multiprocessing as mp
 import numpy as np
@@ -15,8 +15,9 @@ from transformers import (
     PreTrainedTokenizer,
 )
 
-
+from .text_preprocess import DocumentChunker, ChunkConfig, PREFIX
 from ..model import DBBgeM3Vector, ChunkItem
+from ..operations import DBOperations
 
 _MP_CTX = mp.get_context("spawn")
 
@@ -36,8 +37,9 @@ class EmbeddingConfig:
     max_queue_size: int = 2000
 
 class EmbeddingPipeline:
-    def __init__(self, config: EmbeddingConfig):
+    def __init__(self, config: EmbeddingConfig, pool_id: int):
         self.config = config
+        self.pool_id = pool_id
         self.mp_ctx = mp.get_context("spawn")
     ###################
     # Worker functions #
@@ -62,7 +64,7 @@ class EmbeddingPipeline:
 
         for chunk in tqdm(iter(chunk_queue.get,None), desc="Tokenizing chunks"):
             token_ids = embedder.tokenizer.encode(
-                embedder.PREFIX + chunk.content,
+                embedder.prefix + chunk.content,
                 add_special_tokens=False,
                 truncation=True,
                 max_length=self.config.max_length,
@@ -70,20 +72,7 @@ class EmbeddingPipeline:
             token_queue.put((chunk, token_ids))
         token_queue.put(None)
 
-        # while True:
-        #     chunk_item = chunk_queue.get()
-        #     if chunk_item is None:
-        #         break
-        #     token_ids = embedder.tokenizer.encode(
-        #     embedder.PREFIX + chunk_item.content,
-        #     add_special_tokens=False,
-        #     truncation=True,
-        #     max_length=self.config.max_length,
-        # )
-        #     token_queue.put((chunk_item, token_ids))
-        # token_queue.put(None)
-
-
+       
     def embedding_worker(self,
         token_queue: mp.Queue,
         embedding_queue: mp.Queue,
@@ -112,11 +101,31 @@ class EmbeddingPipeline:
 
         embedding_queue.put(None)
 
-    def run_pipeline(self, chunklist: Sequence[ChunkItem | DBBgeM3Vector]) ->  Iterator[tuple[ChunkItem, np.ndarray]]:
+    def dbwrite_worker(self,
+        embedding_queue: mp.Queue,
+    ) -> None:
+        dbop = DBOperations(pool_id=self.pool_id)
+        with dbop.Session() as session:
+            for item in tqdm(iter(embedding_queue.get, None), desc="Writing chunks to database"):
+                chunk, vector = item
+                dbrow = session.get(DBBgeM3Vector, (chunk.doc_id, chunk.chunk_index)) 
+                if dbrow is None:
+                    dbrow = DBBgeM3Vector(doc_id=chunk.doc_id, chunk_index=chunk.chunk_index, 
+                    content=chunk.content)
+                    session.add(dbrow)
+                dbrow.vector = vector
+                session.merge(dbrow)
+            session.flush()
+            session.commit()
+        
+
+    def run_pipeline(self, chunklist: Sequence[ChunkItem | DBBgeM3Vector]) ->  None:
+        start_time = time.time()
         chunk_queue: mp.Queue = _MP_CTX.Queue(maxsize=self.config.max_queue_size)
         token_queue: mp.Queue = _MP_CTX.Queue(maxsize=self.config.max_queue_size)
         embedding_queue: mp.Queue = _MP_CTX.Queue(maxsize=self.config.max_queue_size)
 
+        print("Starting ingest process at", start_time)
         ingest_process = _MP_CTX.Process(
             target=self.ingest_chunks_worker,
             args=(chunklist, chunk_queue),
@@ -140,23 +149,29 @@ class EmbeddingPipeline:
         )
         embedding_process.start()
 
-        while True:
-            item = embedding_queue.get()
-            if item is None:
-                break
-            yield item
+        dbwrite_process = _MP_CTX.Process(
+            target=self.dbwrite_worker,
+            args=(embedding_queue,),
+        )
+        dbwrite_process.start()
+
         ingest_process.join()
         for process in token_processes:
             process.join()
         embedding_process.join()
+        dbwrite_process.join()
 
+        end_time = time.time()
+        print("End time:", end_time, "Start time:", start_time)
+        print("Pipeline finished in", end_time - start_time, "seconds")
 
 
 class TextEmbedding:
-    PREFIX = "passage: "
+    
 
     def __init__(self, config: EmbeddingConfig, *, load_model: bool = True):
         self.config = config
+        self.prefix = PREFIX
         self.tokenizer: PreTrainedTokenizer = AutoTokenizer.from_pretrained(
             config.model_name
         )
@@ -172,79 +187,9 @@ class TextEmbedding:
         model.eval()
         self.model = model
 
-    ###################
-    # Worker functions #
-    ###################
-    @classmethod
-    def ingest_worker(cls,
-        chunk_list: Sequence[ChunkItem | DBBgeM3Vector],
-        chunk_queue: mp.Queue,
-        config: EmbeddingConfig,
-    ) -> None:
-        for chunk in tqdm(chunk_list, desc="Ingesting chunks"):
-            if isinstance(chunk, DBBgeM3Vector):
-                chunk = cast(ChunkItem, chunk)
-            chunk_queue.put(chunk)
-        for _ in range(config.num_workers):
-            chunk_queue.put(None)
-
-    @classmethod
-    def token_worker(
-        cls,
-        chunk_queue: mp.Queue,
-        token_queue: mp.Queue,
-        config: EmbeddingConfig,
-    ) -> None:
-        embedder = cls(config, load_model=False)
-        while True:
-            chunk_item = chunk_queue.get(timeout=10)
-            if chunk_item is None:
-                break
-            token_ids = embedder.tokenizer.encode(
-            embedder.PREFIX + chunk_item.content,
-            add_special_tokens=False,
-            truncation=True,
-            max_length=embedder.config.max_length,
-        )
-            token_queue.put((chunk_item, token_ids))
-        token_queue.put(None)
-
-
-    @classmethod
-    def embedding_worker(cls,
-        token_queue: mp.Queue,
-        embedding_queue: mp.Queue,
-        config: EmbeddingConfig,
-        num_token_workers: int,
-    ) -> None:
-        embedder = cls(config, load_model=True)
-        batch: list[tuple[ChunkItem, list[int]]] = []
-        workers_done = 0
-
-        while workers_done < num_token_workers:
-            item = token_queue.get()
-            if item is None:
-                workers_done += 1
-                continue
-
-            chunk_item, token_ids = item
-            batch.append((chunk_item, token_ids))
-            if len(batch) < config.batch_size:
-                continue
-
-            embedder._flush_embedding_batch(batch, embedding_queue)
-            batch = []
-
-        if batch:
-            embedder._flush_embedding_batch(batch, embedding_queue)
-
-        embedding_queue.put(None)
-
-
-
-
+    
     def embed_texts(self, texts: Sequence[str]) -> np.ndarray:
-        texts = [self.PREFIX + text for text in texts]
+        texts = [self.prefix + text for text in texts]
         encoded = self.tokenizer(
             list(texts),
             return_tensors="pt",
@@ -296,45 +241,4 @@ class TextEmbedding:
         for (chunk, _), vector in zip(batch, embeddings):
             embedding_queue.put((chunk, vector))
 
-    def run(
-        self, chunklist: Sequence[ChunkItem | DBBgeM3Vector]
-    ) -> Iterator[tuple[ChunkItem, np.ndarray]]:
-        chunk_queue: mp.Queue = _MP_CTX.Queue(maxsize=self.config.max_queue_size)
-        token_queue: mp.Queue = _MP_CTX.Queue(maxsize=self.config.max_queue_size)
-        embedding_queue: mp.Queue = _MP_CTX.Queue(maxsize=self.config.max_queue_size)
-
-        ingest_process = _MP_CTX.Process(
-            target=self.ingest_worker,
-            args=(chunklist, chunk_queue, self.config),
-        )
-        
-        token_processes = [
-            _MP_CTX.Process(
-                target=self.token_worker,
-                args=(chunk_queue, token_queue, self.config),
-            )
-            for _ in range(self.config.num_workers)
-        ]
-        print("Starting ingest process")
-        ingest_process.start()
-        print("Starting token processes")
-        for process in token_processes:
-            process.start()
-
-        embedding_process = _MP_CTX.Process(
-            target=self.embedding_worker,
-            args=(token_queue, embedding_queue, self.config, len(token_processes)),
-        )
-
-        print("Starting embedding process")
-        embedding_process.start()
-
-        while True:
-            item = embedding_queue.get()
-            if item is None:
-                break
-            yield item
-        ingest_process.join()
-        for process in token_processes:
-            process.join()
-        embedding_process.join()
+    

@@ -263,21 +263,6 @@ def insert_chunks(ctx: click.Context, pool_id: int) -> None:
     click.echo(f"Inserted {count} chunks for pool {pool_id}.")
 
 
-@cli.command("update-chunks")
-@click.option(
-    "--pool-id",
-    type=int,
-    required=True,
-    help="Datapool id from the datapools table",
-)
-@click.pass_context
-def update_chunks(ctx: click.Context, pool_id: int) -> None:
-    """Re-chunk and replace document text for all indexed doc filemeta in a pool."""
-    dbop = _db_ops(pool_id)
-    count = dbop.update_chunks_from_meta()
-    click.echo(f"Stored {count} chunks for pool {pool_id}.")
-
-
 @cli.command("insert-docs")
 @click.option(
     "--pool-id",
