@@ -232,8 +232,8 @@ class DBMeta(Base):
         deferred=True,
         doc="Full-text search vector derived from inhalt",
     )
-    doc: Mapped[Optional["DBDoc"]] = relationship(back_populates="meta",
-                                    cascade = "all, delete-orphan", passive_deletes=True, default= None)
+    # doc: Mapped[Optional["DBDoc"]] = relationship(back_populates="meta",
+    #                                 cascade = "all, delete-orphan", passive_deletes=True, default= None)
     pic: Mapped[Optional["DBPic"]] = relationship(back_populates="meta",
                                     cascade = "all, delete-orphan", passive_deletes=True, default= None)
     vid: Mapped[Optional["DBVid"]] = relationship(back_populates="meta",
@@ -263,31 +263,31 @@ class DBMeta(Base):
         return session.execute(stmt).scalars().all()
 
 
-class DBDoc(Base):
-    """Optional document row for ``doc`` filemeta (e.g. embedding chunks).
+# class DBDoc(Base):
+#     """Optional document row for ``doc`` filemeta (e.g. embedding chunks).
 
-    Full-text content lives on :class:`DBMeta` (``inhalt`` / ``ts_content``).
-    """
+#     Full-text content lives on :class:`DBMeta` (``inhalt`` / ``ts_content``).
+#     """
 
-    __tablename__ = "documents"
+#     __tablename__ = "documents"
 
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True, sort_order=0, init=False)
+#     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True, sort_order=0, init=False)
 
-    meta_id: Mapped[int] = mapped_column(
-        ForeignKey("filemeta.id", ondelete="CASCADE"),
-        nullable=False,
-        unique=True,
-        init=False,
-    )
-    meta: Mapped["DBMeta"] = relationship(
-        back_populates="doc", init=False, single_parent=True
-    )
-    chunks: Mapped[list["DBBgeM3Vector"]] = relationship(
-        back_populates="doc",
-        default_factory=list,
-        cascade="all, delete-orphan",
-        passive_deletes=True,
-    )
+#     meta_id: Mapped[int] = mapped_column(
+#         ForeignKey("filemeta.id", ondelete="CASCADE"),
+#         nullable=False,
+#         unique=True,
+#         init=False,
+#     )
+#     meta: Mapped["DBMeta"] = relationship(
+#         back_populates="doc", init=False, single_parent=True
+#     )
+#     chunks: Mapped[list["DBBgeM3Vector"]] = relationship(
+#         back_populates="doc",
+#         default_factory=list,
+#         cascade="all, delete-orphan",
+#         passive_deletes=True,
+#     )
 
 
 class DBPic(Base):
@@ -320,8 +320,21 @@ class DBVid(Base):
     meta_id: Mapped[int] = mapped_column(ForeignKey("filemeta.id",ondelete="CASCADE"),
         nullable=False, unique=True, init=False) 
     meta: Mapped["DBMeta"] = relationship(back_populates="vid",init=False, single_parent=True)
-    
-class DocVectorMixin(MappedAsDataclass):
+
+
+class ChunkItem(MappedAsDataclass):
+    doc_id: Mapped[int] = mapped_column(ForeignKey("filemeta.id", ondelete="CASCADE"), primary_key=True)
+    chunk_index: Mapped[int] = mapped_column(primary_key=True)
+    content: Mapped[str] = mapped_column(TEXT, nullable=False)
+
+    # def to_chunk_item(self) -> ChunkItem:
+    #     return ChunkItem(
+    #         doc_id=self.doc_id,
+    #         chunk_index=self.chunk_index,
+    #         content=self.content,
+    #     )
+
+class DocVectorMixin(ChunkItem):
     """Mixin für DocVectorTables"""
 
     @classmethod
@@ -332,13 +345,7 @@ class DocVectorMixin(MappedAsDataclass):
     chunk_id: Mapped[int] = mapped_column(
         primary_key=True, autoincrement=True, init=False, sort_order=0
     )
-    doc_id: Mapped[int] = mapped_column(
-        ForeignKey("documents.id", ondelete="CASCADE"), sort_order=1
-    )
-    chunk_index: Mapped[int] = mapped_column(
-        doc="0-based chunk index within the document", sort_order=2
-    )
-    content: Mapped[str] = mapped_column(TEXT, nullable=False, sort_order=3)
+    
 
     @declared_attr
     def vector(
@@ -349,8 +356,8 @@ class DocVectorMixin(MappedAsDataclass):
     @declared_attr
     def doc(
         cls,
-    ) -> Mapped[DBDoc]:
-        return relationship(back_populates="chunks", init=False, single_parent=True)
+    ) -> Mapped["DBMeta"]:
+        return relationship(DBMeta, init=False, single_parent=True)
 
 
 class PicVectorMixin(MappedAsDataclass):
