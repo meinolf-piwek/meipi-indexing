@@ -8,7 +8,7 @@ extraction for ``DBMeta`` and child ORM rows.
 """
 import io
 import os
-from typing import List, Optional, Tuple, Generator, Sequence, Any
+from typing import List, Optional, Tuple, Generator, Sequence, Any, cast
 from datetime import datetime
 import json
 from pathlib import Path
@@ -23,8 +23,9 @@ from PIL import Image
 import numpy as np
 from libxmp import utils as xmpu
 import sqlalchemy as sa
+from sqlalchemy import Table
 from sqlalchemy.orm import sessionmaker, Session
-from .model import Base as ModelBase, DBMeta, DBPic, DBDoc, DBDinoV2Vector, DBBgeM3Vector, DBVid, IdList, DBPool
+from .model import Base as ModelBase, DBMeta, DBPic, DBDinoV2Vector, DBBgeM3Vector, DBVid, IdList, DBPool
 from .config import Config, FTYPE, resolve_config
 from .text_cleaning import clean_document_text
 from .embedding.text_preprocess import chunks_to_rows
@@ -33,7 +34,7 @@ WATCHER_TABLES: tuple[type[ModelBase], ...] = (
     DBPool,
     DBMeta,
     DBPic,
-    DBDoc,
+    
     DBVid,
 )
 
@@ -125,7 +126,7 @@ class DBOperations():
     def create_tables(self, entities: Optional[Sequence[type[ModelBase]]] = None):
         """Erstellt die Tabellen in der Datenbank, falls sie noch nicht existieren."""
         if entities:
-            tables = [entity.__table__ for entity in entities]  # type: ignore[misc]
+            tables = cast(list[Table], [entity.__table__ for entity in entities])
         else:
             tables = None
         self.metadata.create_all(self.engine, tables=tables)
@@ -133,7 +134,7 @@ class DBOperations():
     def recreate_tables(self, entities: Optional[Sequence[type[ModelBase]]] = None):
         """Recreate tables in the database."""
         if entities:
-            tables = [entity.__table__ for entity in entities]  # type: ignore[misc]
+            tables = cast(list[Table], [entity.__table__ for entity in entities])
         else:
             tables = None
         self.metadata.drop_all(self.engine, tables=tables)
@@ -236,44 +237,30 @@ class DBOperations():
         self, meta: DBMeta, chunker: Any, *, doc_id: int | None = None
     ) -> int:
         """Chunk ``meta.inhalt`` and persist rows in ``bge_m3_vectors``."""
-        if meta.doc is None:
-            raise ValueError(f"filemeta {meta.id} has no documents row")
-        doc_id = doc_id or meta.doc.id
+        doc_id = doc_id or meta.id
         contents = chunker.chunk_text(meta.inhalt)
         return self.replace_document_chunks(doc_id, contents)
 
     def store_chunks_for_meta(self, meta: DBMeta) -> int:
         """Chunk and persist rows for one indexed document filemeta."""
-        if meta.ftype != FTYPE.DOC or not meta.inhalt.strip():
-            return 0
-        if meta.doc is None:
+        
+        if meta.inhalt is None or meta.inhalt.strip() == "":
             self.logger.warning(
-                "Skipping chunks for %s: no documents row", meta.path
+                "Skipping chunks for %s: no inhalt", meta.path
             )
-            return 0
-        if meta.doc.id is None:
-            self.logger.warning(
-                "Skipping chunks for %s: documents row has no id", meta.path
-            )
-            return 0
+            return 0        
         return self.chunk_and_store_document(meta, self._document_chunker())
 
     def insert_chunks_for_meta(self, meta: DBMeta) -> int:
         """Chunk and insert rows for one document without touching existing chunks."""
-        if meta.ftype != FTYPE.DOC or not meta.inhalt.strip():
-            return 0
-        if meta.doc is None:
+        if meta.inhalt is None or meta.inhalt.strip() == "":
             self.logger.warning(
-                "Skipping chunks for %s: no documents row", meta.path
+                "Skipping chunks for %s: no inhalt", meta.path
             )
-            return 0
-        if meta.doc.id is None:
-            self.logger.warning(
-                "Skipping chunks for %s: documents row has no id", meta.path
-            )
-            return 0
+            
+        
         chunks = self._document_chunker().chunk_text(meta.inhalt)
-        return self.insert_document_chunks(meta.doc.id, chunks)
+        return self.insert_document_chunks(meta.id, chunks)
 
     def store_chunks_for_meta_list(self, metalist: Sequence[DBMeta]) -> int:
         """Chunk and persist rows for a batch of newly ingested filemeta rows."""
@@ -291,9 +278,9 @@ class DBOperations():
 
         has_chunks = (
             sa.select(DBBgeM3Vector.chunk_id)
-            .select_from(DBDoc)
-            .join(DBBgeM3Vector, DBBgeM3Vector.doc_id == DBDoc.id)
-            .where(DBDoc.meta_id == DBMeta.id)
+            .select_from(DBMeta)
+            .join(DBBgeM3Vector, DBBgeM3Vector.doc_id == DBMeta.id)
+            .where(DBMeta.id == DBMeta.id)
             .correlate(DBMeta)
             .exists()
         )
@@ -301,18 +288,14 @@ class DBOperations():
         with self.Session() as session:
             stmt = (
                 sa.select(DBMeta)
-                .options(joinedload(DBMeta.doc))
                 .where(
                     DBMeta.pool_id == self.pool.id,
-                    DBMeta.ftype == FTYPE.DOC,
+                    
                     DBMeta.inhalt != "",
                     ~has_chunks,
                 )
             )
             metalist = session.execute(stmt).scalars().unique().all()
-            for meta in metalist:
-                if meta.doc is None:
-                    meta.doc = DBDoc()
             session.flush()
             for meta in metalist:
                 try:
@@ -331,17 +314,15 @@ class DBOperations():
         with self.Session() as session:
             stmt = (
                 sa.select(DBMeta)
-                .options(joinedload(DBMeta.doc))
+                
                 .where(
                     DBMeta.pool_id == self.pool.id,
-                    DBMeta.ftype == FTYPE.DOC,
+                    
                     DBMeta.inhalt != "",
                 )
             )
             metalist = session.execute(stmt).scalars().unique().all()
-            for meta in metalist:
-                if meta.doc is None:
-                    meta.doc = DBDoc()
+            
             session.flush()
             for meta in metalist:
                 try:
@@ -371,8 +352,7 @@ class DBOperations():
             for dbmeta in metalist:
                 _, content = await afop.tika_parse(dbmeta.path)
                 dbmeta.inhalt = clean_document_text(content)
-                if dbmeta.ftype == "doc" and dbmeta.doc is None:
-                    dbmeta.doc = DBDoc()
+                
             session.flush()
             session.commit()
         
@@ -679,8 +659,8 @@ class AsyncFileOperations(AsyncTikaClient):
         if dbmeta is None:
             return None
 
-        if dbmeta.ftype == "doc":
-            dbmeta.doc = DBDoc()
+        #if dbmeta.ftype == "doc":
+        #    dbmeta.doc = DBDoc()
         if dbmeta.ftype == "pic":
             dbmeta.pic = self.DBPic_from_DBMeta(dbmeta)
         if dbmeta.ftype == "vid":
