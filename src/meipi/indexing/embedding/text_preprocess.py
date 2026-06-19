@@ -3,7 +3,7 @@ from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from transformers import AutoTokenizer, AutoModel, PreTrainedTokenizer, PreTrainedModel
 
-from ..model import DBBgeM3Vector
+from ..model import DBBgeM3Vector, ChunkItem
 from ..text_cleaning import clean_document_text
 
 PREFIX = "passage: "
@@ -36,16 +36,13 @@ class DocumentChunker:
     # Public API
     # ------------------------
 
-    def chunk_text(self, text: str) -> list[str]:
+    def chunk_doc(self, id: int, text: str) -> list[ChunkItem]:
         if self.config.clean_text:
             text = self._clean_text(text)
 
         paragraphs = self._split_paragraphs(text)
-        return self._build_chunks(paragraphs)
-
-    def chunk_documents(self, document_list: Sequence[str]) -> Iterator[list[str]]:
-        for text in document_list:
-            yield self.chunk_text(text)
+        chunks = self._build_chunks(paragraphs)
+        return [ChunkItem(doc_id=id, chunk_index=index, content=chunk) for index, chunk in enumerate(chunks)]
 
     # ------------------------
     # Cleaning
@@ -73,7 +70,10 @@ class DocumentChunker:
         para_token_lists = self._encode_paragraphs(paragraphs)
         chunk_token_lists = self._merge_paragraph_tokens(para_token_lists)
         chunk_token_lists = self._apply_overlap_tokens(chunk_token_lists)
-        return [self.tokenizer.decode(tokens) for tokens in chunk_token_lists]
+        chunks: list[str] = []
+        for tokenlist in chunk_token_lists:
+            chunks.append(self.tokenizer.decode(tokenlist, skip_special_tokens=True)) # type: ignore[arg-type] # noqa: E501
+        return chunks
 
     # ------------------------
     # Token Handling
