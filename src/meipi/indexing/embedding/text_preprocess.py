@@ -8,15 +8,6 @@ from ..text_cleaning import clean_document_text
 
 PREFIX = "passage: "
 
-
-def chunks_to_rows(doc_id: int, contents: Sequence[str]) -> list[DBBgeM3Vector]:
-    """Build ``DBBgeM3Vector`` rows from chunker output."""
-    return [
-        DBBgeM3Vector(doc_id=doc_id, chunk_index=index, content=content)
-        for index, content in enumerate(contents)
-    ]
-
-
 @dataclass
 class ChunkConfig:
     model_name: str = "BAAI/bge-m3"
