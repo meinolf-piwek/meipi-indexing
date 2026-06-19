@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterator, Sequence, cast
+from typing import Sequence
 import time
 from tqdm.auto import tqdm
 import multiprocessing as mp
@@ -15,13 +15,11 @@ from transformers import (
     PreTrainedTokenizer,
 )
 
-from .text_preprocess import DocumentChunker, ChunkConfig, PREFIX
+from .text_preprocess import PREFIX, prefix_token_ids
 from ..model import DBBgeM3Vector, ChunkItem
 from ..operations import DBOperations
 
 _MP_CTX = mp.get_context("spawn")
-
-
 
 
 
@@ -50,7 +48,11 @@ class EmbeddingPipeline:
     ) -> None:
         for chunk in tqdm(chunk_list, desc="Ingesting chunks"):
             if isinstance(chunk, DBBgeM3Vector):
-                chunk = cast(ChunkItem, chunk)
+                chunk = ChunkItem(
+                    doc_id=int(chunk.doc_id),
+                    chunk_index=int(chunk.chunk_index),
+                    content=str(chunk.content),
+                )
             chunk_queue.put(chunk)
         for _ in range(self.config.num_workers):
             chunk_queue.put(None)
@@ -63,12 +65,7 @@ class EmbeddingPipeline:
         embedder = TextEmbedding(self.config, load_model=False)
 
         for chunk in tqdm(iter(chunk_queue.get,None), desc="Tokenizing chunks"):
-            token_ids = embedder.tokenizer.encode(
-                embedder.prefix + chunk.content,
-                add_special_tokens=False,
-                truncation=True,
-                max_length=self.config.max_length,
-            )
+            token_ids = embedder.encode_chunk_token_ids(chunk.content)
             token_queue.put((chunk, token_ids))
         token_queue.put(None)
 
@@ -114,7 +111,6 @@ class EmbeddingPipeline:
                     content=chunk.content)
                     session.add(dbrow)
                 dbrow.vector = vector
-                session.merge(dbrow)
             session.flush()
             session.commit()
         
@@ -161,6 +157,12 @@ class EmbeddingPipeline:
         embedding_process.join()
         dbwrite_process.join()
 
+        processes = [ingest_process, *token_processes, embedding_process, dbwrite_process]
+        failed = [p for p in processes if p.exitcode != 0]
+        if failed:
+            details = ", ".join(f"{p.name}(exitcode={p.exitcode})" for p in failed)
+            raise RuntimeError(f"Embedding pipeline worker failed: {details}")
+
         end_time = time.time()
         print("End time:", end_time, "Start time:", start_time)
         print("Pipeline finished in", end_time - start_time, "seconds")
@@ -175,6 +177,8 @@ class TextEmbedding:
         self.tokenizer: PreTrainedTokenizer = AutoTokenizer.from_pretrained(
             config.model_name
         )
+        self._prefix_token_ids = prefix_token_ids(self.tokenizer)
+        self._max_content_tokens = config.max_length - len(self._prefix_token_ids)
         self.model: PreTrainedModel | None = None
         if load_model:
             self._load_model()
@@ -188,17 +192,18 @@ class TextEmbedding:
         self.model = model
 
     
-    def embed_texts(self, texts: Sequence[str]) -> np.ndarray:
-        texts = [self.prefix + text for text in texts]
-        encoded = self.tokenizer(
-            list(texts),
-            return_tensors="pt",
-            padding=True,
-            truncation=True,
-            max_length=self.config.max_length,
+    def encode_chunk_token_ids(self, content: str) -> list[int]:
+        content_ids = self.tokenizer.encode(
+            content,
             add_special_tokens=False,
-        )     
-        return self._embed_encoded(encoded)
+            truncation=True,
+            max_length=self._max_content_tokens,
+        )
+        return self._prefix_token_ids + content_ids
+
+    def embed_texts(self, texts: Sequence[str]) -> np.ndarray:
+        token_ids = [self.encode_chunk_token_ids(text) for text in texts]
+        return self.embed_token_ids(token_ids)
 
     def embed_token_ids(self, input_ids: list[list[int]]) -> np.ndarray:
         encoded = self.tokenizer.pad(
