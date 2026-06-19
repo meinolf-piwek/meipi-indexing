@@ -42,7 +42,7 @@ def test_check_pool_sync_reports_differences_without_applying(
     assert report.filemeta_rows == 10_500
     assert report.pool_indexed_count == 10_234
     assert report.watch_indexed_count == 2
-    assert report.tables_missing == ("pictures", "documents", "videos")
+    assert report.tables_missing == ("pictures", "videos")
     assert report.in_sync == ("docs/keep.txt",)
     assert report.only_in_db == ("docs/stale.txt",)
     assert report.only_on_disk == ("docs/new.txt",)
@@ -200,11 +200,10 @@ def test_ensure_tables_creates_only_missing(sample_pool, test_config, monkeypatc
 
     names = dbop.ensure_tables()
 
-    assert names == ["pictures", "documents", "videos"]
+    assert names == ["pictures", "videos"]
     assert len(created) == 1
     assert {entity.__tablename__ for entity in created[0]} == {
         "pictures",
-        "documents",
         "videos",
     }
 

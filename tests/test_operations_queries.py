@@ -2,13 +2,13 @@
 
 import sqlalchemy as sa
 
-from meipi.indexing.model import DBDoc, DBMeta, DBPic
+from meipi.indexing.model import DBBgeM3Vector, DBMeta, DBPic
 
 from helpers import compile_postgres
 
 
 def _meta_without_child_stmt(*, pool_id: int, ftype: str, child_model):
-    """Mirror the EXISTS pattern used in insert_docs_from_meta / insert_pics_from_meta."""
+    """Mirror the EXISTS pattern used in insert_pics_from_meta."""
     subq = sa.select(child_model.id).where(child_model.meta_id == DBMeta.id).exists()
     return sa.select(DBMeta).where(
         DBMeta.pool_id == pool_id,
@@ -17,16 +17,26 @@ def _meta_without_child_stmt(*, pool_id: int, ftype: str, child_model):
     )
 
 
-def test_insert_docs_stmt_filters_ftype_pool_and_meta_id():
-    stmt = _meta_without_child_stmt(pool_id=7, ftype="doc", child_model=DBDoc)
+def test_insert_missing_chunks_stmt_selects_filemeta_without_vectors():
+    has_chunks = (
+        sa.select(DBBgeM3Vector.chunk_id)
+        .select_from(DBMeta)
+        .join(DBBgeM3Vector, DBBgeM3Vector.doc_id == DBMeta.id)
+        .where(DBMeta.id == DBMeta.id)
+        .correlate(DBMeta)
+        .exists()
+    )
+    stmt = sa.select(DBMeta).where(
+        DBMeta.pool_id == 7,
+        DBMeta.inhalt != "",
+        ~has_chunks,
+    )
     sql = compile_postgres(stmt).lower()
-    assert "filemeta.ftype" in sql
-    assert "'doc'" in sql
     assert "filemeta.pool_id" in sql
     assert "7" in sql
+    assert "bge_m3_vectors" in sql
+    assert "inhalt" in sql
     assert "exists" in sql
-    assert "meta_id" in sql
-    assert "documents.id = filemeta.id" not in sql
 
 
 def test_insert_pics_stmt_filters_ftype_pool_and_meta_id():

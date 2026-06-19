@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from meipi.indexing.cmd.main import index_file
-from meipi.indexing.model import DBDoc, DBMeta, DBPool
+from meipi.indexing.model import DBMeta, DBPool
 
 
 @pytest.mark.asyncio
@@ -50,7 +50,6 @@ async def test_index_file_persists_inhalt_on_reindex(
         sha256=b"\x00" * 32,
         inhalt="updated body text",
     )
-    new_meta.doc = DBDoc()
 
     class FakeAfop:
         async def __aenter__(self):

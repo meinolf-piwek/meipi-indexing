@@ -192,7 +192,7 @@ async def test_tika_parse_cleans_css_and_js_from_inhalt(async_file_ops, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_file_to_db_attaches_doc(async_file_ops, sample_pool, monkeypatch):
+async def test_file_to_db_doc_has_inhalt_only(async_file_ops, sample_pool, monkeypatch):
     rel_path = "a.txt"
     (Path(async_file_ops.docroot) / rel_path).write_text("content", encoding="utf-8")
 
@@ -205,7 +205,8 @@ async def test_file_to_db_attaches_doc(async_file_ops, sample_pool, monkeypatch)
     dbmeta = await async_file_ops.file_to_db(rel_path)
 
     assert dbmeta is not None
-    assert dbmeta.doc is not None
+    assert dbmeta.ftype == "doc"
     assert dbmeta.pic is None
     assert dbmeta.vid is None
     assert dbmeta.inhalt == "body text"
+    assert not hasattr(dbmeta, "doc")

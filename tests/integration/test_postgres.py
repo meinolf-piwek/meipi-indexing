@@ -10,7 +10,7 @@ import pytest
 import sqlalchemy as sa
 from PIL import Image
 
-from meipi.indexing.model import DBDoc, DBMeta, DBPic
+from meipi.indexing.model import DBMeta, DBPic
 from conftest import seed_pic_meta
 
 pytestmark = pytest.mark.integration
@@ -25,7 +25,8 @@ def test_recreate_tables_creates_core_tables(db_ops):
                     SELECT tablename FROM pg_tables
                     WHERE schemaname = 'public'
                       AND tablename IN (
-                        'datapools', 'filemeta', 'documents', 'pictures', 'dino_v2_vectors', 'bge_m3_vectors'
+                        'datapools', 'filemeta', 'pictures', 'videos',
+                        'dino_v2_vectors', 'bge_m3_vectors'
                       )
                     ORDER BY tablename
                     """
@@ -38,9 +39,9 @@ def test_recreate_tables_creates_core_tables(db_ops):
         "bge_m3_vectors",
         "datapools",
         "dino_v2_vectors",
-        "documents",
         "filemeta",
         "pictures",
+        "videos",
     ]
 
 
@@ -157,7 +158,7 @@ def test_insert_pics_from_meta_selects_only_missing_pics(db_ops, tmp_path, monke
         assert pic.meta_id == pending_meta.id
 
 
-def test_dbdoc_fulltext_roundtrip(db_ops):
+def test_filemeta_fulltext_roundtrip(db_ops):
     now = datetime(2024, 3, 1, 8, 0, 0)
     with db_ops.Session() as session:
         meta = DBMeta(
@@ -176,7 +177,6 @@ def test_dbdoc_fulltext_roundtrip(db_ops):
             sha256=b"\xef" * 32,
         )
         meta.inhalt = "Der schnelle braune Fuchs springt über den lazy Hund"
-        meta.doc = DBDoc()
         session.add(meta)
         session.commit()
         session.refresh(meta)
@@ -209,7 +209,6 @@ def test_search_documents_returns_sort_date(db_ops):
             sha256=b"\xab" * 32,
         )
         meta.inhalt = "Der Jahresbericht enthält wichtige Vertragsdetails."
-        meta.doc = DBDoc()
         session.add(meta)
         session.commit()
 
@@ -340,7 +339,6 @@ def test_search_documents_empty_query_uses_filters(db_ops):
             )
             if fname.endswith(".txt"):
                 meta.inhalt = "Beliebiger Inhalt."
-                meta.doc = DBDoc()
             session.add(meta)
         session.commit()
 
@@ -390,7 +388,6 @@ def test_search_documents_sort_by_date_and_path(db_ops):
                 sha256=bytes([sort_date.day]) * 32,
             )
             meta.inhalt = "Gemeinsamer Vertragstext."
-            meta.doc = DBDoc()
             session.add(meta)
         session.commit()
 
@@ -455,8 +452,6 @@ def test_search_documents_filters_and_total_count(db_ops):
                 sha256=bytes([sort_date.month]) * 32,
             )
             meta.inhalt = "Gemeinsamer Vertragstext."
-            if ftype == "doc":
-                meta.doc = DBDoc()
             session.add(meta)
         session.commit()
 

@@ -238,7 +238,10 @@ class DBOperations():
     ) -> int:
         """Chunk ``meta.inhalt`` and persist rows in ``bge_m3_vectors``."""
         doc_id = doc_id or meta.id
-        contents = chunker.chunk_text(meta.inhalt)
+        contents = [
+            chunk.content
+            for chunk in chunker.chunk_doc(doc_id, meta.inhalt)
+        ]
         return self.replace_document_chunks(doc_id, contents)
 
     def store_chunks_for_meta(self, meta: DBMeta) -> int:
@@ -259,7 +262,10 @@ class DBOperations():
             )
             
         
-        chunks = self._document_chunker().chunk_text(meta.inhalt)
+        chunks = [
+            chunk.content
+            for chunk in self._document_chunker().chunk_doc(meta.id, meta.inhalt)
+        ]
         return self.insert_document_chunks(meta.id, chunks)
 
     def store_chunks_for_meta_list(self, metalist: Sequence[DBMeta]) -> int:
