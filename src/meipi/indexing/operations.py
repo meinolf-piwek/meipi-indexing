@@ -18,20 +18,16 @@ from PIL import Image
 import numpy as np
 from libxmp import utils as xmpu
 import sqlalchemy as sa
-from sqlalchemy import Table
-from sqlalchemy.orm import sessionmaker, Session
-from .model import Base as ModelBase, DBMeta, DBPic, DBDinoV2Vector, DBBgeM3Vector, DBVid, IdList, DBPool
-from .config import Config, FTYPE, resolve_config
+#from sqlalchemy import Table
+from sqlalchemy.orm import sessionmaker
+from .model import (Base as ModelBase, DBMeta, DBPic, DBDinoV2Vector, DBBgeM3Vector,
+ DBVid, IdList, DBPool, DBServerPool, _all_db_tables, _data_tables, _config_tables)
+from .config import Config, FTYPE, resolve_config, EmbeddingConfig
 from .text_cleaning import clean_document_text
+from .embedding.text_chunking import DocumentChunker
 #from .embedding.text_preprocess import chunks_to_rows
 
-WATCHER_TABLES: tuple[type[ModelBase], ...] = (
-    DBPool,
-    DBMeta,
-    DBPic,
-    
-    DBVid,
-)
+WATCHER_TABLES: tuple[type[ModelBase], ...] = _data_tables
 
 def _dali_resizer(*args, **kwargs):
     from .dali import DALIImageResizer
@@ -57,6 +53,7 @@ class DBOperations():
         sessionkwargs = {} if not sessionkwargs else sessionkwargs
         self.metadata = config.metadata
         self.pg_schema = config.pg_schema
+        self.server_name = config.server_name
         connect_args = {"options": f"-c search_path={config.pg_schema}"}
         self.engine = sa.create_engine(self.config.db_conn_URL, connect_args = connect_args,
         logging_name="DBOperations",pool_logging_name=self.config.logger_name, **enginekwargs)
@@ -70,12 +67,14 @@ class DBOperations():
             raise
         else:
             self.logger.info("PostgreSQL engine created successfully.")
-        self._document_chunker_instance: Any = None
+        #self._document_chunker_instance: Any = None
         if pool_id is not None:
             self.get_pool(pool_id)
+            self.pool_id = self.pool.id
         elif pool is not None:
             #self.create_pool(pool)
             self.pool = pool
+            self.pool_id = pool.id
         elif allow_no_pool:
             self.logger.warning(
                 "No pool provided; filesystem operations require pool_id or pool"
@@ -83,9 +82,25 @@ class DBOperations():
             self.pool = DBPool(
                 id=0, pool="default", description="Default pool"
             )
+            self.pool_id = None
+            self.docroot = ""
         else:
             raise ValueError("Either pool_id or pool must be provided")
-        self.docroot = config.resolved_docroot()
+        if self.pool_id is not None:
+            self.serverpool = self.get_serverpool()
+            self.docroot = self.serverpool.docroot
+
+    def get_serverpool(self) -> DBServerPool:
+        """Get the document root for the server."""
+        with self.Session() as session:
+            serverpool = session.scalar(sa.select(DBServerPool).
+            where(DBServerPool.server_name == self.server_name, DBServerPool.pool_id == self.pool_id))
+            if serverpool is None:
+                raise ValueError(
+                    f"No serverpools row for server_name={self.server_name!r} "
+                    f"and pool_id={self.pool_id}"
+                )
+            return serverpool
 
     def schema_info(self) -> dict[str, Any]:
         """Get the schema information of the database."""
@@ -121,7 +136,7 @@ class DBOperations():
     def create_tables(self, entities: Optional[Sequence[type[ModelBase]]] = None):
         """Erstellt die Tabellen in der Datenbank, falls sie noch nicht existieren."""
         if entities:
-            tables = cast(list[Table], [entity.__table__ for entity in entities])
+            tables = cast(list[sa.Table], [entity.__table__ for entity in entities])
         else:
             tables = None
         self.metadata.create_all(self.engine, tables=tables)
@@ -129,7 +144,7 @@ class DBOperations():
     def recreate_tables(self, entities: Optional[Sequence[type[ModelBase]]] = None):
         """Recreate tables in the database."""
         if entities:
-            tables = cast(list[Table], [entity.__table__ for entity in entities])
+            tables = cast(list[sa.Table], [entity.__table__ for entity in entities])
         else:
             tables = None
         self.metadata.drop_all(self.engine, tables=tables)
@@ -194,14 +209,8 @@ class DBOperations():
                 self.logger.info("Removed index entry for %s", rel_path)
             return deleted > 0
 
-    def _document_chunker(self) -> Any:
-        if self._document_chunker_instance is None:
-            from .embedding.text_preprocess import ChunkConfig, DocumentChunker
-
-            self._document_chunker_instance = DocumentChunker(
-                ChunkConfig(clean_text=False)
-            )
-        return self._document_chunker_instance
+    def _document_chunker(self) -> DocumentChunker:
+        return DocumentChunker(EmbeddingConfig(clean_text=False))
 
     
     def upsert_document_chunks(self, doc_id: int,text: str) -> int:
@@ -260,7 +269,7 @@ class DBOperations():
                 DBMeta.inhalt == "",
             )
             metalist = session.execute(stmt).scalars().all()
-            afop = AsyncFileOperations(pool=self.pool, config=self.config, skip_ocr=skipocr)
+            afop = AsyncFileOperations(serverpool=self.serverpool, config=self.config, skip_ocr=skipocr)
             for dbmeta in metalist:
                 _, content = await afop.tika_parse(dbmeta.path)
                 dbmeta.inhalt = clean_document_text(content)
@@ -284,7 +293,7 @@ class DBOperations():
                 ~subq
             )
             metalist = session.execute(stmt).scalars().all()
-            afop = AsyncFileOperations(pool=self.pool, config=self.config, skip_ocr=True)
+            afop = AsyncFileOperations(serverpool=self.serverpool, config=self.config, skip_ocr=True)
             for dbmeta in metalist:
                 dbmeta.pic = afop.DBPic_from_DBMeta(dbmeta)
             session.flush()
@@ -445,7 +454,7 @@ class AsyncFileOperations(AsyncTikaClient):
     """Async file parsing helpers built on top of ``tika_client``."""
     def __init__(
         self,
-        pool: DBPool,
+        serverpool: DBServerPool,
         config: Config | None = None,
         skip_ocr: bool = True,
         timeout: float = 30,
@@ -454,19 +463,22 @@ class AsyncFileOperations(AsyncTikaClient):
         config = resolve_config(config)
         self.config = config
         self.logger = config.logger
-        self.docroot = config.resolved_docroot()
+        
+        #self.docroot = DBOperations(pool=pool, config=config).get_docroot()
         self.tika_url = config.tika_noocr_url if skip_ocr else config.tika_ocrurl
-        self.pool = pool
+        self.serverpool = serverpool
+        self.docroot = self.serverpool.docroot
         super().__init__(self.tika_url, timeout=timeout, compress=compress)
         
     async def __aenter__(self) -> AsyncFileOperations:
         """Enter the TikaClient context."""
         return self
     
+    
     def dir_tree(self, rel_path: str) -> Generator[str]:
         """Durchläuft rekursiv alle Dateien im Verzeichnisbaum, 
         extrahiert die Metadaten und Inhalte und erstellt DB-Objekte."""
-        abspath = os.path.join(self.docroot,rel_path)
+        abspath = os.path.join(self.serverpool.docroot,rel_path)
         assert os.path.exists(abspath), f"Directory {abspath} does not exist"
         for dirpath, _, filenames in os.walk(abspath):
             for filename in filenames:
@@ -522,7 +534,7 @@ class AsyncFileOperations(AsyncTikaClient):
             sha256 = file_digest(f, "sha256")
         try:
             dbmeta = DBMeta(
-                pool_id=self.pool.id,
+                pool_id=self.serverpool.pool_id,
                 path=path,
                 fname=os.path.basename(path),
                 fdate=fdate,

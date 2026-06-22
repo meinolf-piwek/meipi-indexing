@@ -1,7 +1,5 @@
 """Tests for configuration helpers."""
 
-import os
-
 import pytest
 
 from meipi.indexing.config import Config
@@ -38,11 +36,13 @@ def test_db_passwd_skips_keyring_without_dbus(
     assert test_config.db_passwd_from_keyring() == "test-secret"
 
 
-def test_resolved_docroot(test_config: Config):
-    assert test_config.resolved_docroot() == os.path.abspath(test_config.docroot)
+def test_server_name_default(test_config: Config):
+    assert test_config.server_name == "test-server"
 
 
-def test_db_operations_sets_search_path(test_config: Config, sample_pool, monkeypatch):
+def test_db_operations_sets_search_path(
+    test_config: Config, sample_pool, patch_serverpool_lookup, monkeypatch
+):
     from meipi.indexing.operations import DBOperations
 
     captured: dict = {}

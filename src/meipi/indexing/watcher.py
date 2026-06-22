@@ -228,7 +228,8 @@ def format_sync_report(report: SyncReport, *, verbose: bool = False) -> str:
             "matches no files on disk and no indexed paths for this pool"
         )
         lines.append(
-            "Hint: RELPATH is relative to IND_DOCROOT; use --docroot for the filesystem root"
+            "Hint: RELPATH is relative to the pool docroot from serverpools; "
+            "set IND_SERVER_NAME or pass --server_name"
         )
     elif report.has_differences:
         lines.append("Differences found (no changes applied)")

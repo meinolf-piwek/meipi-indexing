@@ -6,7 +6,7 @@ Die .env-Datei sollte im Root-Verzeichnis der App liegen und den Namen "config.e
 
 Die globale Instanz ``appconf`` wird einmal beim Import von ``meipi.indexing`` erzeugt.
 ``CONFIG_PATH`` (``MEIPI_CONFIG_ENV`` oder ``config.env``) wird dabei einmalig festgelegt.
-Einzelne Felder können zur Laufzeit gesetzt werden (z. B. ``--docroot`` in der CLI).
+Einzelne Felder können zur Laufzeit gesetzt werden (z. B. ``--server_name`` in der CLI).
 Änderungen an der Env-Datei auf dem Datenträger oder an ``MEIPI_CONFIG_ENV`` erfordern einen
 Prozess-Neustart.
 
@@ -17,7 +17,7 @@ Beispiel für eine ``.env-Datei``::
     IND_PG_USER=postgres                    #PostgreSQL Username
     IND_PG_DATABASE=postgres                #PostgreSQL Database Name
     IND_PG_API_KEY=pg-docker                #API-Key-Name für das DB-Passwort im Keyring
-    IND_DOCROOT=/home/rslsync/folders/  #Dokumenten-Root-Verzeichnis
+    IND_SERVER_NAME=lenox                   #Server-Name für serverpools-Zuordnung
     IND_LOGGER_NAME=sqlalchemy.engine          #Name des Loggers für SQLAlchemy
     IND_DOCSUF='{
         ".pdf",
@@ -66,7 +66,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import MetaData, URL as saURL
 #from pillow_heif import register_heif_opener
 #from PIL import ImageFile
-
+from dataclasses import dataclass
 class FTYPE():
     DOC:str = "doc"
     PIC:str = "pic"
@@ -103,10 +103,11 @@ class Config(BaseSettings):
     pg_api_key: str = Field(default="pg-docker")
     tika_noocr_url: str = Field(default="http://localhost:9998")
     tika_ocrurl: str = Field(default="http://localhost:9997")
-    docroot: str = Field(
-        default=".",
-        description="Filesystem root; file paths in the DB are relative to this directory",
-    )
+    server_name: str = Field(default="lenox")
+    # docroot: str = Field(
+    #     default=".",
+    #     description="Filesystem root; file paths in the DB are relative to this directory",
+    # )
     docsuf: Set[str] = Field(default={".pdf",".txt",".md",".docx",".doc",
         ".html",".htm",".epub",".odt", ".xlsx", ".xls", ".csv"})
     picsuf: Set[str] = Field(default={".jpg", ".jpeg", ".bmp", ".png", ".heic", ".tiff", ".tif"})
@@ -125,9 +126,9 @@ class Config(BaseSettings):
 
         return orm_metadata
 
-    def resolved_docroot(self) -> str:
-        """Absolute path to the configured filesystem root."""
-        return os.path.abspath(self.docroot)
+    # def resolved_docroot(self) -> str:
+    #     """Absolute path to the configured filesystem root."""
+    #     return os.path.abspath(self.docroot)
 
     def db_passwd_from_keyring(self) -> str:
         """DB password from SecretService keyring when D-Bus is available, else ``pg_passwd``."""
@@ -203,3 +204,18 @@ def install_appconf(config: Config) -> None:
         name = getattr(mod, "__name__", "")
         if name.startswith("meipi.indexing") and hasattr(mod, "appconf"):
             mod.appconf = config #type: ignore[assignment]
+
+
+@dataclass
+class EmbeddingConfig:
+    model_name: str = "BAAI/bge-m3"
+    device: str = "auto"
+    batch_size: int = 16
+    max_length: int = 512
+    overlap: int = 80
+    min_chunk_tokens: int = 50
+    clean_text: bool = True
+    normalize: bool = True
+    use_fp16: bool = True
+    num_workers: int = 8
+    max_queue_size: int = 2000

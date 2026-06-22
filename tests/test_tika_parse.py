@@ -9,7 +9,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from meipi.indexing.config import Config
-from meipi.indexing.model import DBPool
 from meipi.indexing.operations import AsyncFileOperations
 from tika_client import TikaKey
 
@@ -21,8 +20,8 @@ def _tika_response(data: dict) -> MagicMock:
 
 
 @pytest.fixture
-def async_file_ops(test_config: Config, sample_pool: DBPool) -> AsyncFileOperations:
-    return AsyncFileOperations(sample_pool, config=test_config, skip_ocr=True)
+def async_file_ops(test_config: Config, sample_serverpool) -> AsyncFileOperations:
+    return AsyncFileOperations(serverpool=sample_serverpool, config=test_config, skip_ocr=True)
 
 
 @pytest.mark.asyncio

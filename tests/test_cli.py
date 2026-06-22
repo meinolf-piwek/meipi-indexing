@@ -12,7 +12,7 @@ def test_cli_help():
     result = runner.invoke(cli, ["--help"])
     assert result.exit_code == 0
     assert "Index documents and images" in result.output
-    assert "--docroot" in result.output
+    assert "--server_name" in result.output
 
 
 def test_read_files_subcommand_help():
@@ -259,7 +259,7 @@ def test_schema_info_invokes_db_operations(monkeypatch):
     assert "42" in result.output
 
 
-def test_read_files_sets_docroot_on_appconf(monkeypatch, tmp_path):
+def test_read_files_sets_server_name_on_appconf(monkeypatch, tmp_path):
     async def noop_bulk(**_kwargs):
         return None
 
@@ -269,14 +269,12 @@ def test_read_files_sets_docroot_on_appconf(monkeypatch, tmp_path):
         lambda pool_id: type("FakeDB", (), {"pool": type("P", (), {"id": pool_id})()})(),
     )
 
-    docroot = tmp_path / "data"
-    docroot.mkdir()
     runner = CliRunner()
     result = runner.invoke(
         cli,
         [
-            "--docroot",
-            str(docroot),
+            "--server_name",
+            "staging",
             "read-files",
             "--pool-id",
             "1",
@@ -288,4 +286,4 @@ def test_read_files_sets_docroot_on_appconf(monkeypatch, tmp_path):
 
     import meipi.indexing
 
-    assert meipi.indexing.appconf.docroot == str(docroot)
+    assert meipi.indexing.appconf.server_name == "staging"

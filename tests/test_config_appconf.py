@@ -9,12 +9,12 @@ from meipi.indexing.model import Base, DBMeta, orm_metadata
 
 
 def test_appconf_is_mutable():
-    original = appconf.docroot
+    original = appconf.server_name
     try:
-        appconf.docroot = "/tmp/mutable-docroot"
-        assert appconf.docroot == "/tmp/mutable-docroot"
+        appconf.server_name = "other-server"
+        assert appconf.server_name == "other-server"
     finally:
-        appconf.docroot = original
+        appconf.server_name = original
 
 
 def test_config_metadata_is_shared_orm_registry():
@@ -30,7 +30,7 @@ def test_orm_tables_are_unqualified():
 
 
 def test_db_operations_search_path_follows_pg_schema(
-    test_config, sample_pool, monkeypatch
+    test_config, sample_pool, patch_serverpool_lookup, monkeypatch
 ):
     from meipi.indexing.operations import DBOperations
 

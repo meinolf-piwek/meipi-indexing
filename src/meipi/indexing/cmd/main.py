@@ -32,7 +32,7 @@ async def index_file(
     else:
         raise ValueError("Either pool_id or pool must be provided")
 
-    async with AsyncFileOperations(pool, config) as afop:
+    async with AsyncFileOperations(serverpool=dbop.serverpool, config=config) as afop:
         dbmeta = await afop.file_to_db(rel_path)
         if dbmeta is None:
             return False
@@ -76,7 +76,7 @@ async def read_files_bulk(
     Args:
         pool_id: Id of an existing datapool row (preferred for CLI usage).
         pool: In-memory pool object (e.g. for scripts/notebooks).
-        relpath: Path relative to ``IND_DOCROOT``.
+        relpath: Path relative to the pool docroot (from serverpools).
         batchsize: Number of files processed per batch.
         incremental: Skip files whose path is already in filemeta for this pool.
         update_thumbs: Run thumbnail generation after ingest.
@@ -92,7 +92,7 @@ async def read_files_bulk(
     else:
         raise ValueError("Either pool_id or pool must be provided")
 
-    async with AsyncFileOperations(pool, config) as afop:
+    async with AsyncFileOperations(serverpool=dbop.serverpool, config=config) as afop:
         files = list(afop.dir_tree(relpath))
         if incremental:
             with dbop.Session() as session:

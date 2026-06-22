@@ -25,7 +25,8 @@ def test_db_operations_allow_no_pool(monkeypatch):
 
     ops = DBOperations(allow_no_pool=True)
 
-    assert ops.docroot == os.path.abspath(ops.config.docroot)
+    assert ops.docroot == ""
+    assert ops.pool_id is None
 
 
 def test_update_thumbs_updates_rows(mock_db_operations):

@@ -1,11 +1,12 @@
 """Tests for document chunk ORM mapping."""
 
-from meipi.indexing.embedding.text_preprocess import ChunkConfig, DocumentChunker
+from meipi.indexing.config import EmbeddingConfig
+from meipi.indexing.embedding.text_chunking import DocumentChunker
 from meipi.indexing.model import DBBgeM3Vector
 
 
 def test_chunk_doc_maps_to_bge_m3_rows() -> None:
-    chunker = DocumentChunker(ChunkConfig(clean_text=False))
+    chunker = DocumentChunker(EmbeddingConfig(clean_text=False))
     chunks = chunker.chunk_doc(7, "Vertragstext")
     rows = [
         DBBgeM3Vector(
@@ -25,7 +26,7 @@ def test_chunk_doc_maps_to_bge_m3_rows() -> None:
 
 def test_chunk_doc_preserves_order_in_rows() -> None:
     chunker = DocumentChunker(
-        ChunkConfig(clean_text=False, max_tokens=32, overlap=0, min_chunk_tokens=1)
+        EmbeddingConfig(clean_text=False, max_length=32, overlap=0, min_chunk_tokens=1)
     )
     text = ("Alpha paragraph. " * 40) + "\n\n" + ("Beta paragraph. " * 40)
     chunks = chunker.chunk_doc(5, text)

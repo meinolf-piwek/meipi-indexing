@@ -19,12 +19,13 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker
 
 from meipi.indexing.config import Config
-from meipi.indexing.model import DBMeta, DBPic, DBPool
+from meipi.indexing.model import DBMeta, DBPic, DBPool, DBServerPool
 from meipi.indexing.operations import DBOperations
 
 pytestmark = pytest.mark.integration
 
 _ENV_URL = "MEIPI_TEST_DATABASE_URL"
+_INTEGRATION_SERVER = "integration"
 
 
 def _integration_config() -> Config:
@@ -43,6 +44,7 @@ def _integration_config() -> Config:
         pg_passwd=url.password or "",
         pg_database=url.database or "postgres",
         pg_schema="public",
+        server_name=_INTEGRATION_SERVER,
     )
 
 
@@ -89,41 +91,39 @@ def db_ops(pg_engine, integration_config: Config, tmp_path):
     """Fresh schema and DBOperations bound to a persisted datapool row."""
     docroot = tmp_path / "files"
     docroot.mkdir()
-    integration_config_with_root = integration_config.model_copy(
-        update={"docroot": str(docroot)}
-    )
 
-    ops = DBOperations(
-        pool=DBPool(
-            id=0,
-            pool="integration-pool",
-            description="integration test",
-        ),
-        config=integration_config_with_root,
-    )
-    ops.engine.dispose()
-    ops.engine = pg_engine
-    ops.Session = sessionmaker(bind=pg_engine, expire_on_commit=False)
-
-    ops.recreate_tables()
+    bootstrap = DBOperations(allow_no_pool=True, config=integration_config)
+    bootstrap.engine.dispose()
+    bootstrap.engine = pg_engine
+    bootstrap.Session = sessionmaker(bind=pg_engine, expire_on_commit=False)
+    bootstrap.recreate_tables()
 
     pool_name = f"integration-{tmp_path.name}"
-    with ops.Session() as session:
-        session.execute(sa.delete(DBPool))
-        session.commit()
+    with bootstrap.Session() as session:
         pool_row = DBPool(
             id=1,
             pool=pool_name,
             description="integration test",
         )
         session.add(pool_row)
+        session.flush()
+        session.add(
+            DBServerPool(
+                server_name=integration_config.server_name,
+                pool_id=pool_row.id,
+                docroot=str(docroot),
+            )
+        )
         session.commit()
-        session.refresh(pool_row)
-        ops.pool = pool_row
+
+    ops = DBOperations(pool_id=1, config=integration_config)
+    ops.engine.dispose()
+    ops.engine = pg_engine
+    ops.Session = sessionmaker(bind=pg_engine, expire_on_commit=False)
 
     yield ops
 
-    ops.recreate_tables()
+    bootstrap.recreate_tables()
 
 
 def seed_pic_meta(

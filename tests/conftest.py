@@ -8,14 +8,19 @@ import pytest
 import sqlalchemy as sa
 
 from meipi.indexing.config import Config
-from meipi.indexing.model import DBPool
+from meipi.indexing.model import DBPool, DBServerPool
 
 
 @pytest.fixture
-def test_config(tmp_path, monkeypatch: pytest.MonkeyPatch) -> Config:
-    """Config that never touches the system keyring."""
+def test_docroot(tmp_path):
     docroot = tmp_path / "docs"
     docroot.mkdir()
+    return docroot
+
+
+@pytest.fixture
+def test_config(tmp_path, monkeypatch: pytest.MonkeyPatch, test_docroot) -> Config:
+    """Config that never touches the system keyring."""
     monkeypatch.setattr(
         Config,
         "db_passwd_from_keyring",
@@ -28,7 +33,7 @@ def test_config(tmp_path, monkeypatch: pytest.MonkeyPatch) -> Config:
         pg_passwd="test-secret",
         pg_database="testdb",
         pg_schema="public",
-        docroot=str(docroot),
+        server_name="test-server",
     )
 
 
@@ -42,7 +47,30 @@ def sample_pool() -> DBPool:
 
 
 @pytest.fixture
-def mock_db_operations(test_config: Config, sample_pool: DBPool, monkeypatch: pytest.MonkeyPatch):
+def sample_serverpool(sample_pool: DBPool, test_docroot) -> DBServerPool:
+    return DBServerPool(
+        server_name="test-server",
+        pool_id=sample_pool.id,
+        docroot=str(test_docroot),
+    )
+
+
+@pytest.fixture
+def patch_serverpool_lookup(monkeypatch: pytest.MonkeyPatch, sample_serverpool: DBServerPool):
+    monkeypatch.setattr(
+        "meipi.indexing.operations.DBOperations.get_serverpool",
+        lambda self: sample_serverpool,
+    )
+
+
+@pytest.fixture
+def mock_db_operations(
+    test_config: Config,
+    sample_pool: DBPool,
+    sample_serverpool: DBServerPool,
+    test_docroot,
+    monkeypatch: pytest.MonkeyPatch,
+):
     """DBOperations with a mocked engine and controllable session."""
     from meipi.indexing.operations import DBOperations
 
@@ -63,7 +91,10 @@ def mock_db_operations(test_config: Config, sample_pool: DBPool, monkeypatch: py
     ops.config = test_config
     ops.logger = test_config.logger
     ops.pool = sample_pool
-    ops.docroot = test_config.resolved_docroot()
+    ops.pool_id = sample_pool.id
+    ops.server_name = test_config.server_name
+    ops.serverpool = sample_serverpool
+    ops.docroot = str(test_docroot)
     ops.engine = engine
     ops.Session = SessionFactory
     ops.metadata = sa.MetaData()

@@ -143,10 +143,13 @@ def main() -> None:
             ),
         )
         st.text_input(
-            "Document root (IND_DOCROOT)",
-            value=appconf.resolved_docroot(),
+            "Server name (IND_SERVER_NAME)",
+            value=appconf.server_name,
             disabled=True,
-            help="Filesystem root for indexed file paths. Set IND_DOCROOT before starting the app.",
+            help=(
+                "Logical server name; filesystem roots are stored per pool in "
+                "the serverpools table."
+            ),
         )
         if st.button("Reload pools", use_container_width=True):
             _list_pools.clear()
@@ -285,7 +288,7 @@ Examples: `Vertrag`, `"Projektplan"`, `Rechnung -Entwurf`, `image/tiff`
         return
 
     for hit in result.hits:
-        _render_hit(hit, appconf.resolved_docroot())
+        _render_hit(hit, _db_for_pool(pool_id).docroot)
 
 
 def launch() -> None:

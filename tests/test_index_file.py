@@ -29,6 +29,7 @@ async def test_index_file_persists_inhalt_on_reindex(
 
     dbop = MagicMock()
     dbop.pool = sample_pool
+    dbop.serverpool = MagicMock()
     dbop.Session = MagicMock(return_value=session)
     dbop.update_thumb_for_pic = MagicMock()
     dbop.upsert_document_chunks = MagicMock(return_value=2)
@@ -67,7 +68,7 @@ async def test_index_file_persists_inhalt_on_reindex(
     )
     monkeypatch.setattr(
         "meipi.indexing.cmd.main.AsyncFileOperations",
-        lambda pool, config: FakeAfop(),
+        lambda serverpool, config: FakeAfop(),
     )
 
     ok = await index_file(pool=sample_pool, rel_path="notes.txt", update_thumbs=False)

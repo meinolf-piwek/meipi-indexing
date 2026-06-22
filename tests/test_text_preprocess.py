@@ -1,11 +1,12 @@
 """Tests for document text chunking."""
 
-from meipi.indexing.embedding.text_preprocess import ChunkConfig, DocumentChunker
+from meipi.indexing.config import EmbeddingConfig
+from meipi.indexing.embedding.text_chunking import DocumentChunker
 from meipi.indexing.model import ChunkItem
 
 
 def test_chunk_doc_returns_chunk_items() -> None:
-    chunker = DocumentChunker(ChunkConfig(clean_text=False))
+    chunker = DocumentChunker(EmbeddingConfig(clean_text=False))
     chunks = chunker.chunk_doc(7, "Alpha paragraph.\n\nBeta paragraph.")
     assert len(chunks) >= 1
     assert isinstance(chunks[0], ChunkItem)

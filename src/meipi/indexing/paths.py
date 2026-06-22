@@ -25,12 +25,12 @@ def resolve_watch_relpath(docroot: str, watch_path: str) -> str:
         except ValueError as exc:
             raise ValueError(
                 f"Watch path {watch_path!r} is not under docroot {docroot_abs!r}. "
-                "Set IND_DOCROOT or pass --docroot to the indexed filesystem root."
+                "Set IND_SERVER_NAME and ensure a serverpools row exists for the pool."
             ) from exc
         if rel == ".." or rel.startswith(".." + os.sep):
             raise ValueError(
                 f"Watch path {watch_path!r} is not under docroot {docroot_abs!r}. "
-                "Set IND_DOCROOT or pass --docroot to the indexed filesystem root."
+                "Set IND_SERVER_NAME and ensure a serverpools row exists for the pool."
             )
         return normalize_rel_path(rel)
     return normalize_rel_path(watch_path)

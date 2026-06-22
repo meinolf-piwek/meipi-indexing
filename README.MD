@@ -41,20 +41,25 @@ Die Konfiguration wird aus `config.env` (oder einer alternativen Datei via
 
 Wichtige Variablen:
 
+- `IND_SERVER_NAME` (logischer Servername; Dateisystem-Root pro Pool in `serverpools`)
 - `IND_PG_HOST`, `IND_PG_PORT`, `IND_PG_USER`, `IND_PG_DATABASE`
 - `IND_PG_API_KEY` (Keyring-Schluessel fuer das DB-Passwort)
-- `IND_DOCROOT` (Dateisystem-Root fuer indexierte Dateien)
 - `IND_DOCSUF`, `IND_PICSUF`, `IND_VIDSUF`
 - `IND_TIKA_NOOCR_URL`, `IND_TIKA_OCRURL`
+
+Der Dateisystem-Root fuer einen Datenpool liegt in der Tabelle `serverpools`
+(`server_name`, `pool_id`, `docroot`). Beim ersten Alembic-Upgrade werden bestehende
+Pools mit `IND_SERVER_NAME` (Standard `lenox`) und optional `IND_DOCROOT` (Standard `.`)
+belegt.
 
 Beispiel:
 
 ```bash
 export MEIPI_CONFIG_ENV=./config.env
-export IND_DOCROOT=/pfad/zu/dateien
+export IND_SERVER_NAME=lenox
 ```
 
-Alternativ pro Aufruf: `meipi-index --docroot /pfad/zu/dateien …` (Alias: `--rootpath`).
+Alternativ pro Aufruf: `meipi-index --server_name lenox …` (Alias: `--rootpath`).
 
 Hinweis: Die globale Konfiguration wird beim Import geladen. Nach Aenderungen an
 Umgebungsvariablen oder `config.env` ist ein Prozess-Neustart noetig.

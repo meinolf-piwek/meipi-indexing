@@ -42,7 +42,12 @@ def test_check_pool_sync_reports_differences_without_applying(
     assert report.filemeta_rows == 10_500
     assert report.pool_indexed_count == 10_234
     assert report.watch_indexed_count == 2
-    assert report.tables_missing == ("pictures", "videos")
+    assert report.tables_missing == (
+        "pictures",
+        "videos",
+        "dino_v2_vectors",
+        "bge_m3_vectors",
+    )
     assert report.in_sync == ("docs/keep.txt",)
     assert report.only_in_db == ("docs/stale.txt",)
     assert report.only_on_disk == ("docs/new.txt",)
@@ -142,7 +147,7 @@ def test_list_watch_files_respects_watch_subtree(tmp_path: Path) -> None:
 
 
 def test_list_pool_file_paths_filters_by_watch_tree(
-    sample_pool, test_config, monkeypatch: pytest.MonkeyPatch
+    sample_pool, test_config, patch_serverpool_lookup, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     session = MagicMock()
     session.__enter__.return_value = session
@@ -164,7 +169,9 @@ def test_list_pool_file_paths_filters_by_watch_tree(
     assert paths == {"docs/a.txt"}
 
 
-def test_count_pool_filemeta(sample_pool, test_config, monkeypatch: pytest.MonkeyPatch):
+def test_count_pool_filemeta(
+    sample_pool, test_config, patch_serverpool_lookup, monkeypatch: pytest.MonkeyPatch
+):
     session = MagicMock()
     session.__enter__.return_value = session
     session.__exit__.return_value = False
@@ -183,7 +190,9 @@ def test_count_pool_filemeta(sample_pool, test_config, monkeypatch: pytest.Monke
     assert dbop.count_pool_filemeta() == 12_345
 
 
-def test_ensure_tables_creates_only_missing(sample_pool, test_config, monkeypatch):
+def test_ensure_tables_creates_only_missing(
+    sample_pool, test_config, patch_serverpool_lookup, monkeypatch
+):
     dbop = DBOperations(pool=sample_pool, config=test_config)
     created: list = []
 
@@ -200,11 +209,13 @@ def test_ensure_tables_creates_only_missing(sample_pool, test_config, monkeypatc
 
     names = dbop.ensure_tables()
 
-    assert names == ["pictures", "videos"]
+    assert names == ["pictures", "videos", "dino_v2_vectors", "bge_m3_vectors"]
     assert len(created) == 1
     assert {entity.__tablename__ for entity in created[0]} == {
         "pictures",
         "videos",
+        "dino_v2_vectors",
+        "bge_m3_vectors",
     }
 
 

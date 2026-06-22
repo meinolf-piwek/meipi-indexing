@@ -46,19 +46,19 @@ def _print_sync_check(
     ),
 )
 @click.option(
-    "--docroot",
+    "--server_name",
     "--rootpath",
-    "docroot",
-    type=click.Path(exists=True, file_okay=False, path_type=str),
+    "server_name",
+    type=str,
     default=None,
-    help="Filesystem root for indexed files (overrides IND_DOCROOT).",
+    help="Server name for indexed files (overrides IND_SERVER_NAME).",
 )
 @click.pass_context
-def cli(ctx: click.Context, env_file: str | None, docroot: str | None) -> None:
+def cli(ctx: click.Context, env_file: str | None, server_name: str | None) -> None:
     """Index documents and images into PostgreSQL."""
     ctx.ensure_object(dict)
-    if docroot is not None:
-        appconf.docroot = docroot
+    if server_name is not None:
+        appconf.server_name = server_name
 
 
 @cli.command("schema-info")
@@ -95,23 +95,23 @@ def create_tables(ctx: click.Context, recreate: bool) -> None:
         click.echo("Tables created (existing tables unchanged).")
 
 
-@cli.command("create-pool")
-@click.option("--name", required=True, help="Unique pool name")
-@click.option("--description", default=None, help="Optional description")
-@click.pass_context
-def create_pool(
-    ctx: click.Context,
-    name: str,
-    description: str | None,
-) -> None:
-    """Register a new datapool."""
-    dbop = DBOperations(allow_no_pool=True)
-    pool = DBPool(pool=name, description=description)
-    created = dbop.create_pool(pool)
-    click.echo(
-        f"Created pool id={created.id} name={created.pool!r} "
-        f"(docroot={appconf.resolved_docroot()!r})"
-    )
+# @cli.command("create-pool")
+# @click.option("--name", required=True, help="Unique pool name")
+# @click.option("--description", default=None, help="Optional description")
+# @click.pass_context
+# def create_pool(
+#     ctx: click.Context,
+#     name: str,
+#     description: str | None,
+# ) -> None:
+#     """Register a new datapool."""
+#     dbop = DBOperations(allow_no_pool=True)
+#     pool = DBPool(pool=name, description=description)
+#     created = dbop.create_pool(pool)
+#     click.echo(
+#         f"Created pool id={created.id} name={created.pool!r} "
+#         f"(docroot={appconf.resolved_docroot()!r})"
+#     )
 
 
 @cli.command("clear-pool")
@@ -316,8 +316,8 @@ def check_sync(
 ) -> None:
     """Check filesystem and database sync for a pool (report only).
 
-    RELPATH is relative to IND_DOCROOT (or --docroot), e.g. ``docs`` or ``.``.
-    Absolute paths under docroot are accepted; existence is checked against docroot, not cwd.
+    RELPATH is relative to the pool docroot (from serverpools), e.g. ``docs`` or ``.``.
+    Absolute paths under that docroot are accepted; existence is checked against docroot, not cwd.
     """
     report = _print_sync_check(_db_ops(pool_id), relpath, as_json=as_json, verbose=verbose)
     if not report.is_in_sync:
@@ -377,7 +377,7 @@ def watch(
 ) -> None:
     """Watch a pool directory and keep the index in sync with filesystem changes.
 
-    RELPATH is relative to IND_DOCROOT (same as IND_WATCH_PATH in Docker), not the process cwd.
+    RELPATH is relative to the pool docroot (from serverpools), not the process cwd.
     """
     dbop = _db_ops(pool_id)
     watcher = PoolWatcher(

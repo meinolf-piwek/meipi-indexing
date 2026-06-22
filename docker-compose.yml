@@ -19,6 +19,7 @@ x-watcher-env: &watcher-env
   IND_PG_DATABASE: ${IND_PG_DATABASE:-postgres}
   IND_PG_SCHEMA: ${IND_PG_SCHEMA:-meipi-indexing}
   IND_TIKA_NOOCR_URL: http://tika:9998
+  IND_SERVER_NAME: ${IND_SERVER_NAME:-lenox}
   IND_DOCROOT: /data
 
 services:
