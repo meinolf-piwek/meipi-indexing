@@ -28,8 +28,8 @@ meipi.indexing.operations module
    :show-inheritance:
    :undoc-members:
 
-meipi.indexing.search module
-----------------------------
+meipi.indexing.search package
+-----------------------------
 
 .. automodule:: meipi.indexing.search
    :members:

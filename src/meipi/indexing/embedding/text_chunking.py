@@ -1,40 +1,21 @@
 import re
-from collections.abc import Iterator, Sequence
-from dataclasses import dataclass
-from transformers import AutoTokenizer, AutoModel, PreTrainedTokenizer, PreTrainedModel
 
-from ..model import DBBgeM3Vector, ChunkItem
+from transformers import AutoTokenizer, PreTrainedTokenizer
+
+from ..model import ChunkItem
 from ..text_cleaning import clean_document_text
-
-PREFIX = "passage: "
-
-
-def prefix_token_ids(tokenizer: PreTrainedTokenizer) -> list[int]:
-    return tokenizer.encode(PREFIX, add_special_tokens=False)
-
-
-@dataclass
-class ChunkConfig:
-    model_name: str = "BAAI/bge-m3"
-    max_tokens: int = 512
-    overlap: int = 80
-    min_chunk_tokens: int = 50
-    clean_text: bool = True
+from ..config import EmbeddingConfig
 
 
 class DocumentChunker:
-    def __init__(self, config: ChunkConfig):
+    def __init__(self, config: EmbeddingConfig):
         self.config = config
         self.tokenizer: PreTrainedTokenizer = AutoTokenizer.from_pretrained(config.model_name)
         self._space_tokens = self.tokenizer.encode(" ", add_special_tokens=False)
-        self._prefix_token_ids = prefix_token_ids(self.tokenizer)
-        self._max_content_tokens = config.max_tokens - len(self._prefix_token_ids)
-        
-    # ------------------------
-    # Public API
-    # ------------------------
 
     def chunk_doc(self, id: int, text: str) -> list[ChunkItem]:
+        if text is None or text == "":
+            return []
         if self.config.clean_text:
             text = self._clean_text(text)
 
@@ -42,24 +23,12 @@ class DocumentChunker:
         chunks = self._build_chunks(paragraphs)
         return [ChunkItem(doc_id=id, chunk_index=index, content=chunk) for index, chunk in enumerate(chunks)]
 
-    # ------------------------
-    # Cleaning
-    # ------------------------
-
     def _clean_text(self, text: str) -> str:
         return clean_document_text(text)
-
-    # ------------------------
-    # Splitting
-    # ------------------------
 
     def _split_paragraphs(self, text: str) -> list[str]:
         paragraphs = re.split(r"\n{2,}", text)
         return [p.strip() for p in paragraphs if p.strip()]
-
-    # ------------------------
-    # Chunk Builder
-    # ------------------------
 
     def _build_chunks(self, paragraphs: list[str]) -> list[str]:
         if not paragraphs:
@@ -70,12 +39,8 @@ class DocumentChunker:
         chunk_token_lists = self._apply_overlap_tokens(chunk_token_lists)
         chunks: list[str] = []
         for tokenlist in chunk_token_lists:
-            chunks.append(self.tokenizer.decode(tokenlist, skip_special_tokens=True)) # type: ignore[arg-type] # noqa: E501
+            chunks.append(self.tokenizer.decode(tokenlist, skip_special_tokens=True))  # type: ignore[arg-type]
         return chunks
-
-    # ------------------------
-    # Token Handling
-    # ------------------------
 
     def _encode_paragraphs(self, paragraphs: list[str]) -> list[list[int]]:
         if len(paragraphs) == 1:
@@ -91,7 +56,7 @@ class DocumentChunker:
 
         for para_tokens in para_token_lists:
             para_len = len(para_tokens)
-            if para_len > self._max_content_tokens:
+            if para_len > self.config.max_length:
                 if current:
                     chunks.append(current)
                     current = []
@@ -100,7 +65,7 @@ class DocumentChunker:
                 continue
 
             extra = para_len + (len(self._space_tokens) if current else 0)
-            if current_len + extra <= self._max_content_tokens:
+            if current_len + extra <= self.config.max_length:
                 if current:
                     current.extend(self._space_tokens)
                 current.extend(para_tokens)
@@ -116,10 +81,10 @@ class DocumentChunker:
         return chunks
 
     def _split_long_tokens(self, tokens: list[int]) -> list[list[int]]:
-        step = self._max_content_tokens - self.config.overlap
+        step = self.config.max_length - self.config.overlap
         chunks: list[list[int]] = []
         for i in range(0, len(tokens), step):
-            chunk_tokens = tokens[i : i + self._max_content_tokens]
+            chunk_tokens = tokens[i : i + self.config.max_length]
             if len(chunk_tokens) >= self.config.min_chunk_tokens:
                 chunks.append(chunk_tokens)
         return chunks

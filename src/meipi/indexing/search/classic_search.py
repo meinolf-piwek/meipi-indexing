@@ -13,7 +13,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import ColumnElement
 
-from .model import DBMeta
+from ..model import DBMeta
 
 QueryMode = Literal["plain", "websearch", "phrase"]
 SortField = Literal["sort_date", "path"]

@@ -46,10 +46,9 @@ _search_language = "german"
 orm_metadata = MetaData()
 
 
-# (filesystem path, filemeta.id)
 type IdList = Sequence[Tuple[str, int]]
 
-class PILArray(types.TypeDecorator):
+class PILArray(types.TypeDecorator): 
     """
     Type for PIL Image as numpy array
     
@@ -161,6 +160,12 @@ class DBPool(Base):
     id: Mapped[int] = mapped_column(
         primary_key=True, autoincrement=True, sort_order=0, default=None
     )
+
+class DBServerPool(Base):
+    __tablename__ = "serverpools"
+    server_name: Mapped[str] = mapped_column(nullable=False, primary_key=True, doc="Name of the server")
+    pool_id: Mapped[int] = mapped_column(ForeignKey("datapools.id"), nullable=False, primary_key=True, doc="Pool ID")
+    docroot: Mapped[str] = mapped_column(nullable=False, doc="Root directory of the server")
 
 class DBMeta(Base):
     """SQLAlchemy model for Meta data stored in PostgreSQL."""
@@ -323,15 +328,29 @@ class DBVid(Base):
 
 
 class ChunkItem(MappedAsDataclass):
-    doc_id: Mapped[int] = mapped_column(ForeignKey("filemeta.id", ondelete="CASCADE"), primary_key=True)
-    chunk_index: Mapped[int] = mapped_column(primary_key=True)
-    content: Mapped[str] = mapped_column(TEXT, nullable=False)
-
-    
+    """Base class for chunk items"""
+    doc_id: Mapped[int] = mapped_column(ForeignKey("filemeta.id", ondelete="CASCADE"), primary_key=True,
+        doc="Reference to the filemeta table",
+        )
+    chunk_index: Mapped[int] = mapped_column(primary_key=True,
+        doc="Index of the chunk",
+        )
+    content: Mapped[str] = mapped_column(TEXT, nullable=False,
+        doc="Content of the chunk",
+        )
 
 class DocVectorMixin(ChunkItem):
     """Mixin für DocVectorTables"""
+    __tablename__ = ""
 
+    ts_content: Mapped[TSVECTOR] = mapped_column(
+            TSVECTOR,
+            Computed("to_tsvector('german', content)"),
+            init=False,
+            nullable=True,
+            deferred=True,
+            doc="Full-text search vector derived from chunk content",
+        )
     @classmethod
     @abstractmethod
     def _vector_size(cls) -> int:
@@ -341,14 +360,30 @@ class DocVectorMixin(ChunkItem):
     def vector(
         cls,
     ) -> Mapped[list[float] | None]:
-        return mapped_column(Vector(cls._vector_size()), nullable=True, default=None)
+        return mapped_column(Vector(cls._vector_size()), nullable=True, default=None,
+        doc="Vector derived from chunk content",
+        )
 
     @declared_attr
     def doc(
         cls,
     ) -> Mapped["DBMeta"]:
-        return relationship(DBMeta, init=False, single_parent=True)
+        return relationship(DBMeta, init=False, single_parent=True,
+        doc="Content of the related filemeta entry",
+        )
 
+    @declared_attr.directive
+    def __table_args__(cls) -> tuple:
+        return (
+            Index(f"ix_{cls.__tablename__}_ts_content", "ts_content", postgresql_using="gin"),
+            Index(
+                f"ix_{cls.__tablename__}_vector_hnsw",
+                "vector",
+                postgresql_using="hnsw",
+                postgresql_with={"m": 16, "ef_construction": 64},
+                postgresql_ops={"vector": "vector_cosine_ops"},
+            ),
+        )
 
 class PicVectorMixin(MappedAsDataclass):
     """Mixin für PicVectorTables
@@ -399,4 +434,8 @@ def _unqualify_orm_tables() -> None:
         mapper.persist_selectable.schema = None
 
 
+
 _unqualify_orm_tables()
+_all_db_tables = (DBPool, DBServerPool, DBMeta, DBPic, DBVid, DBDinoV2Vector, DBBgeM3Vector)
+_config_tables = (DBPool, DBServerPool)
+_data_tables = (DBMeta, DBPic, DBVid, DBDinoV2Vector, DBBgeM3Vector)

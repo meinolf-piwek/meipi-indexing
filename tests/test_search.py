@@ -3,7 +3,8 @@
 from datetime import datetime
 from types import SimpleNamespace
 
-from meipi.indexing.search import DocSearchResult, _normalize_suffixes, search_documents
+from meipi.indexing.search import DocSearchResult, search_documents
+from meipi.indexing.search.classic_search import _metadata_tsvector, _normalize_suffixes, _tsquery
 from helpers import POSTGRES_DIALECT
 
 
@@ -43,7 +44,6 @@ def test_search_sql_includes_metadata_tsvector(mock_db_operations):
     from sqlalchemy import or_, select
 
     from meipi.indexing.model import DBMeta
-    from meipi.indexing.search import _metadata_tsvector, _tsquery
 
     ops, _session = mock_db_operations
     lang = "german"

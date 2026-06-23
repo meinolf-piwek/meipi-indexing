@@ -16,9 +16,12 @@ __all__ = ["Config",
            "FTYPE"]
 __version__ = "0.0.1"
 
-from .config import CONFIG_PATH, Config, FTYPE
+from .config import CONFIG_PATH, Config, FTYPE, EmbeddingConfig
 
 appconf: Config = Config()
 
 from .operations import DBOperations, AsyncFileOperations
-from .model import DBMeta, DBPic, Base, DBDinoV2Vector, DBBgeM3Vector, DBPool, DBCatalog
+from .model import DBMeta, DBPic, Base, DBDinoV2Vector, DBBgeM3Vector, DBPool, DBCatalog, DBServerPool, DBVid
+#from .embedding import TextEmbedding, EmbeddingPipeline, DocumentChunker, FlagEmbedding
+
+# (filesystem path, filemeta.id)
