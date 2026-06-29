@@ -18,6 +18,7 @@ import io
 #import types
 #from tkinter import CASCADE
 from typing import Optional, Self, Sequence, List, Tuple
+from dataclasses import dataclass
 from abc import ABC, abstractmethod
 from PIL import Image
 import numpy as np
@@ -47,6 +48,11 @@ orm_metadata = MetaData()
 
 
 type IdList = Sequence[Tuple[str, int]]
+
+@dataclass
+class DocItem:
+    id: int
+    inhalt: str
 
 class PILArray(types.TypeDecorator): 
     """
@@ -342,8 +348,9 @@ class ChunkItem(MappedAsDataclass):
 class DocVectorMixin(ChunkItem):
     """Mixin für DocVectorTables"""
     __tablename__ = ""
-
-    ts_content: Mapped[TSVECTOR] = mapped_column(
+    @declared_attr
+    def ts_content(cls) -> Mapped[TSVECTOR]:
+        return mapped_column(
             TSVECTOR,
             Computed("to_tsvector('german', content)"),
             init=False,
@@ -356,12 +363,13 @@ class DocVectorMixin(ChunkItem):
     def _vector_size(cls) -> int:
         raise NotImplementedError("Subclasses must implement this method")
 
+    
     @declared_attr
     def vector(
         cls,
     ) -> Mapped[list[float] | None]:
         return mapped_column(Vector(cls._vector_size()), nullable=True, default=None,
-        doc="Vector derived from chunk content",
+        doc="Vector derived from chunk content",init = True, kw_only=True
         )
 
     @declared_attr

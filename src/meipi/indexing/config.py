@@ -218,4 +218,17 @@ class EmbeddingConfig:
     normalize: bool = True
     use_fp16: bool = True
     num_workers: int = 8
+    
+
+@dataclass
+class PipelineConfig:
+    n_db_read_workers: int = 4
+    n_chunking_workers: int = 4
+    n_embedding_workers: int = 1
+    n_postprocess_workers: int = 1
+    n_db_write_workers: int = 4
     max_queue_size: int = 2000
+
+
+
+

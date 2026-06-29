@@ -1,8 +1,9 @@
 import re
 
 from transformers import AutoTokenizer, PreTrainedTokenizer
+from itertools import chain
 
-from ..model import ChunkItem
+from ..model import DocItem, ChunkItem
 from ..text_cleaning import clean_document_text
 from ..config import EmbeddingConfig
 
@@ -13,15 +14,18 @@ class DocumentChunker:
         self.tokenizer: PreTrainedTokenizer = AutoTokenizer.from_pretrained(config.model_name)
         self._space_tokens = self.tokenizer.encode(" ", add_special_tokens=False)
 
-    def chunk_doc(self, id: int, text: str) -> list[ChunkItem]:
-        if text is None or text == "":
+    def chunk_doc(self, doc: DocItem) -> list[ChunkItem]:
+        if doc.inhalt is None or doc.inhalt == "":
             return []
         if self.config.clean_text:
-            text = self._clean_text(text)
+            doc.inhalt = self._clean_text(doc.inhalt)
 
-        paragraphs = self._split_paragraphs(text)
+        paragraphs = self._split_paragraphs(doc.inhalt)
         chunks = self._build_chunks(paragraphs)
-        return [ChunkItem(doc_id=id, chunk_index=index, content=chunk) for index, chunk in enumerate(chunks)]
+        return [ChunkItem(doc_id=doc.id, chunk_index=index, content=chunk) for index, chunk in enumerate(chunks)]
+
+    def chunk_doclist(self, docs: list[DocItem]) -> list[ChunkItem]:
+        return list(chain.from_iterable(self.chunk_doc(doc) for doc in docs))
 
     def _clean_text(self, text: str) -> str:
         return clean_document_text(text)
