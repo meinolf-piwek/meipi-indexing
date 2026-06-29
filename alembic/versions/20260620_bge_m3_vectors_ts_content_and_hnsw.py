@@ -67,6 +67,6 @@ def downgrade() -> None:
 
     vectors = f'"{schema}"."bge_m3_vectors"'
 
-    op.execute(sa.text(f"DROP INDEX IF EXISTS {schema}.ix_bge_m3_vectors_vector_hnsw"))
-    op.execute(sa.text(f"DROP INDEX IF EXISTS {schema}.ix_bge_m3_vectors_ts_content"))
+    op.execute(sa.text(f'DROP INDEX IF EXISTS "{schema}".ix_bge_m3_vectors_vector_hnsw'))
+    op.execute(sa.text(f'DROP INDEX IF EXISTS "{schema}".ix_bge_m3_vectors_ts_content'))
     op.execute(sa.text(f"ALTER TABLE {vectors} DROP COLUMN IF EXISTS ts_content"))

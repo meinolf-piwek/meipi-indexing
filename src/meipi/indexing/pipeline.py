@@ -24,24 +24,12 @@ import json
 import logging
 import os
 import queue
-import random
 import threading
 import time
 from tqdm.auto import tqdm
 from concurrent.futures import ThreadPoolExecutor, Future, wait, FIRST_COMPLETED
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable, Optional
-
-
-# --------------------------------------------------------------------------
-# Logging setup
-# --------------------------------------------------------------------------
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(threadName)s] %(message)s",
-)
-
 
 
 
@@ -285,6 +273,7 @@ class Pipeline():
         self.monitor_logger = logging.getLogger("pipeline.monitor")
         self.monitor_logger.setLevel(logging.INFO)
         self.pid: Optional[int] = None
+        self.monitor_thread: Optional[threading.Thread] = None
 
     def start(self) -> None:
         for s in self.stages:
@@ -306,21 +295,20 @@ class Pipeline():
         for item in input:
             self.queues[0].put(item)
         self.queues[0].put(None)
-        #drain the final queue to ensure all items are processed
-        for item in tqdm(iter(self.queues[-1].get, None)):
-            self.queues[-1].task_done()
-        self.stages[-1]._stopped.wait()  # Wait for the last stage to finish
+        final_q = self.queues[-1]
+        for item in tqdm(iter(final_q.get, None)):
+            final_q.task_done()
+        final_q.task_done()  # account for the sentinel None
+        self.stages[-1]._stopped.wait()
         
         
     
     def shutdown_gracefully(self, stages: list[CoordinatedStage], queues: list[queue.Queue]) -> None:
-        # Send sentinel to first queue
         queues[0].put(None)
-        # Wait for all stages to finish
         for s in stages:
             s.join()
-        # Wait for monitor thread to finish
-        self.monitor_thread.join()
+        if self.monitor_thread is not None:
+            self.monitor_thread.join()
 
 # --------------------------------------------------------------------------
 # Monitor (direct port of old monitor(), reading health_snapshot() instead

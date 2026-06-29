@@ -21,7 +21,7 @@ import sqlalchemy as sa
 #from sqlalchemy import Table
 from sqlalchemy.orm import sessionmaker
 from .model import (Base as ModelBase, DBMeta, DBPic, DBDinoV2Vector, DBBgeM3Vector,
- DBVid, IdList, DBPool, DBServerPool, _all_db_tables, _data_tables, _config_tables)
+ DBVid, IdList, DBPool, DBServerPool, _all_db_tables, _data_tables, _config_tables, DocItem)
 from .config import Config, FTYPE, resolve_config, EmbeddingConfig
 from .text_cleaning import clean_document_text
 from .embedding.text_chunking import DocumentChunker
@@ -83,11 +83,16 @@ class DBOperations():
                 id=0, pool="default", description="Default pool"
             )
             self.pool_id = None
+            self.serverpool: DBServerPool | None = None
             self.docroot = ""
         else:
             raise ValueError("Either pool_id or pool must be provided")
         if self.pool_id is not None:
-            self.serverpool = self.get_serverpool()
+            try:
+                self.serverpool = self.get_serverpool()
+            except Exception:
+                self.engine.dispose()
+                raise
             self.docroot = self.serverpool.docroot
 
     def get_serverpool(self) -> DBServerPool:
@@ -210,7 +215,9 @@ class DBOperations():
             return deleted > 0
 
     def _document_chunker(self) -> DocumentChunker:
-        return DocumentChunker(EmbeddingConfig(clean_text=False))
+        if not hasattr(self, "_chunker_cache"):
+            self._chunker_cache = DocumentChunker(EmbeddingConfig(clean_text=False))
+        return self._chunker_cache
 
     
     def upsert_document_chunks(self, doc_id: int,text: str) -> int:
@@ -220,7 +227,7 @@ class DBOperations():
                 sa.delete(DBBgeM3Vector).where(DBBgeM3Vector.doc_id == doc_id)
             )
             rows = [DBBgeM3Vector(doc_id=doc_id, chunk_index=chunk.chunk_index, content=chunk.content) 
-                for chunk in self._document_chunker().chunk_doc(doc_id, text)]
+                for chunk in self._document_chunker().chunk_doc(DocItem(doc_id, text))]
             session.add_all(rows)
             session.commit()
             return len(rows)
@@ -269,6 +276,7 @@ class DBOperations():
                 DBMeta.inhalt == "",
             )
             metalist = session.execute(stmt).scalars().all()
+            assert self.serverpool is not None, "serverpool required; do not use allow_no_pool for this operation"
             afop = AsyncFileOperations(serverpool=self.serverpool, config=self.config, skip_ocr=skipocr)
             for dbmeta in metalist:
                 _, content = await afop.tika_parse(dbmeta.path)
@@ -293,6 +301,7 @@ class DBOperations():
                 ~subq
             )
             metalist = session.execute(stmt).scalars().all()
+            assert self.serverpool is not None, "serverpool required; do not use allow_no_pool for this operation"
             afop = AsyncFileOperations(serverpool=self.serverpool, config=self.config, skip_ocr=True)
             for dbmeta in metalist:
                 dbmeta.pic = afop.DBPic_from_DBMeta(dbmeta)

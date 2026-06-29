@@ -67,6 +67,12 @@ from sqlalchemy import MetaData, URL as saURL
 #from pillow_heif import register_heif_opener
 #from PIL import ImageFile
 from dataclasses import dataclass
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(threadName)s] %(message)s",
+)
+
 class FTYPE():
     DOC:str = "doc"
     PIC:str = "pic"
