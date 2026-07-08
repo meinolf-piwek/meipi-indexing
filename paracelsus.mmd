@@ -1,0 +1,65 @@
+erDiagram
+  bge_m3_vectors {
+    INTEGER chunk_index PK
+    INTEGER doc_id PK,FK
+    TEXT content
+    TSVECTOR ts_content "nullable"
+    VECTOR(1024) vector "nullable"
+  }
+
+  datapools {
+    INTEGER id PK
+    VARCHAR description "nullable"
+    VARCHAR pool UK
+  }
+
+  dino_v2_vectors {
+    INTEGER pic_id PK,FK
+    VECTOR(1024) vector
+  }
+
+  filemeta {
+    INTEGER id PK
+    INTEGER pool_id FK
+    BIGINT clength
+    VARCHAR ctype
+    DATETIME fdate
+    VARCHAR fname
+    BIGINT fsize
+    VARCHAR ftype
+    TEXT inhalt
+    JSONB md_keys "nullable"
+    JSONB meta_data "nullable"
+    VARCHAR path
+    BYTEA phash "nullable"
+    BYTEA sha256 "nullable"
+    DATETIME sort_date
+    VARCHAR suffix
+    BYTEA thumbarray "nullable"
+    TSVECTOR ts_content "nullable"
+  }
+
+  pictures {
+    INTEGER id PK
+    INTEGER meta_id FK
+    BOOLEAN truncated "nullable"
+    JSONB xmp "nullable"
+  }
+
+  serverpools {
+    INTEGER pool_id PK,FK
+    VARCHAR server_name PK
+    VARCHAR docroot
+  }
+
+  videos {
+    INTEGER id PK
+    INTEGER meta_id FK
+  }
+
+  filemeta ||--o| bge_m3_vectors : doc_id
+  pictures ||--o| dino_v2_vectors : pic_id
+  datapools ||--o{ filemeta : pool_id
+  filemeta ||--o| pictures : meta_id
+  datapools ||--o| serverpools : pool_id
+  filemeta ||--o| videos : meta_id
